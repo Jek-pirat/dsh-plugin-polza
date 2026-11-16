@@ -37,6 +37,7 @@ export class PolzaStore {
   private timer: ReturnType<typeof setTimeout> | undefined
   private catalogPromise: Promise<CatalogRow[]> | undefined
   private disposed = false
+  private providerRevision = 0
 
   readonly getSnapshot = (): Snapshot => this.snapshot
 
@@ -61,8 +62,13 @@ export class PolzaStore {
 
   async refresh(force = false): Promise<void> {
     clearTimeout(this.timer)
+    const providerRevision = this.providerRevision
     try {
       const state = await call<PolzaState>(`state${force ? '?refresh=1' : ''}`)
+      const current = this.snapshot.state
+      if (current !== null && providerRevision !== this.providerRevision) {
+        state.prefs = { ...state.prefs, modelProviders: current.prefs.modelProviders }
+      }
       this.set({ state, loading: false, error: null })
     } catch (error) {
       this.set({ loading: false, error: error instanceof Error ? error.message : String(error) })
@@ -104,6 +110,24 @@ export class PolzaStore {
   async savePrefs(patch: Partial<PolzaPrefs>): Promise<void> {
     await call('prefs', { method: 'POST', body: patch })
     await this.refresh()
+  }
+
+  async modelProviders(model: string): Promise<string[]> {
+    return (await call<{ providers: string[] }>(`model-providers?model=${encodeURIComponent(model)}`)).providers
+  }
+
+  async saveModelProviders(model: string, providers: readonly string[]): Promise<void> {
+    const { prefs } = await call<{ prefs: PolzaPrefs }>(`model-providers?model=${encodeURIComponent(model)}`, {
+      method: 'POST', body: { providers },
+    })
+    this.providerRevision += 1
+    const state = this.snapshot.state
+    if (state === null) return
+    const modelProviders = { ...state.prefs.modelProviders }
+    const saved = prefs.modelProviders[model]
+    if (saved === undefined) delete modelProviders[model]
+    else modelProviders[model] = saved
+    this.set({ state: { ...state, prefs: { ...state.prefs, modelProviders } } })
   }
 
   pickerIcons(): Promise<Record<string, string>> {

@@ -2,7 +2,9 @@
 // (доверие Host/Origin и cookie-авторизацию владельца проверяет harness до нас).
 import { fetchPolzaAccount } from './account.ts'
 import type { PolzaAccount } from './account.ts'
+import { fetchModelProviders } from './catalog.ts'
 import type { PolzaCatalogStore } from './catalog.ts'
+import { polzaModelSlugSchema } from './contract.ts'
 import type { PolzaCatalogModel } from './contract.ts'
 import { describe, displayName, thinkingLevelMap } from './models.ts'
 import { openInBrowser, startLoopbackLogin } from './oauth.ts'
@@ -206,6 +208,23 @@ export class PolzaApi {
         return json({ ok: true })
       }) },
       { path: `${API_PREFIX}/prefs`, methods: ['POST'], fetch: guard(async request => json({ prefs: await this.deps.prefs.update(await body(request) as Partial<PolzaPrefs>) })) },
+      { path: `${API_PREFIX}/model-providers`, methods: ['GET', 'POST'], fetch: guard(async request => {
+        const model = polzaModelSlugSchema.parse(new URL(request.url).searchParams.get('model'))
+        if (request.method === 'GET') return json({ providers: await fetchModelProviders(this.deps.baseUrl, model) })
+        const providers = (await body(request))['providers']
+        if (!Array.isArray(providers) || !providers.every((name: unknown): name is string =>
+          typeof name === 'string' && name.trim() !== '') || new Set(providers).size !== providers.length) {
+          return json({ error: 'Ожидался список уникальных провайдеров' }, 400)
+        }
+        const previous = this.deps.prefs.current().modelProviders[model] ?? []
+        const added = providers.filter(name => !previous.includes(name))
+        if (added.length > 0) {
+          const available = await fetchModelProviders(this.deps.baseUrl, model)
+          if (added.some(name => !available.includes(name))) return json({ error: 'Провайдер недоступен для этой модели' }, 400)
+        }
+        const prefs = await this.deps.prefs.setModelProviders(model, providers)
+        return json({ prefs })
+      }) },
       { path: `${API_PREFIX}/spend`, methods: ['GET'], fetch: guard(async request => json({ spend: this.spendOf(new URL(request.url).searchParams.get('session') ?? '') })) },
       { path: `${API_PREFIX}/icon`, methods: ['GET'], fetch: guard(async (request) => {
         const svg = await this.deps.icons.resolve(new URL(request.url).searchParams.get('slug') ?? '')
