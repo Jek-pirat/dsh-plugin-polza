@@ -51,6 +51,7 @@ export interface PolzaProfileInput {
   provider?: string
   displayName?: string
   retryPath?: string
+  modelProvider?: (modelId: string) => string | undefined
 }
 
 export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProviderProfile {
@@ -58,14 +59,28 @@ export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProvide
   const displayName = input.displayName ?? 'Polza'
   const api = openAICompletionsApi()
   const models = [...input.models]
+  function withProvider<T extends { onPayload?: (payload: unknown, model: Model<Api>) => unknown }>(
+    modelId: string,
+    options?: T,
+  ): T | undefined {
+    const selected = input.modelProvider?.(modelId)
+    if (selected === undefined) return options
+    return {
+      ...options,
+      onPayload: async (payload: unknown, model: Model<Api>) => {
+        const body = await options?.onPayload?.(payload, model) ?? payload
+        return { ...body as Record<string, unknown>, provider: { only: [selected] } }
+      },
+    } as T
+  }
   const piProvider = {
     id: provider,
     name: displayName,
     ...models[0] === undefined ? {} : { baseUrl: models[0].baseUrl },
     auth: harnessApiKeyAuth(),
     getModels: () => models,
-    stream: (model, context, options) => api.stream(model, context, options),
-    streamSimple: (model, context, options) => api.streamSimple(model, context, options),
+    stream: (model, context, options) => api.stream(model, context, withProvider(model.id, options)),
+    streamSimple: (model, context, options) => api.streamSimple(model, context, withProvider(model.id, options)),
   } as Provider
   return {
     provider,

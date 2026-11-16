@@ -2,7 +2,7 @@
 // Последний удачный ответ лежит на диске, чтобы пикер не ждал сеть при старте.
 import { readFile } from 'node:fs/promises'
 import { writeFileAtomic } from './atomic.ts'
-import { parsePolzaCatalog } from './contract.ts'
+import { parsePolzaCatalog, polzaModelSlugSchema } from './contract.ts'
 import type { PolzaCatalogModel } from './contract.ts'
 
 const CATALOG_PATH = '/v1/models?type=chat'
@@ -27,6 +27,23 @@ export async function fetchPolzaCatalog(baseUrl: string, options: FetchCatalogOp
   const models = parsePolzaCatalog(await response.json())
   if (models.length === 0) throw new Error('каталог Пользы пуст')
   return models
+}
+
+export async function fetchModelProviders(baseUrl: string, model: string, fetchImpl: typeof fetch = fetch): Promise<string[]> {
+  const slug = polzaModelSlugSchema.parse(model).split('/').map(encodeURIComponent).join('/')
+  const response = await fetchImpl(`${trimSlash(baseUrl)}/v1/models/${slug}`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`каталог Пользы ответил HTTP ${response.status}`)
+  const detail = await response.json() as { data?: { providers?: unknown }; providers?: unknown } | null
+  const providers = detail?.data?.providers ?? detail?.providers
+  if (!Array.isArray(providers)) return []
+  const names = providers.flatMap((entry: unknown) => {
+    const name = (entry as { name?: unknown } | null)?.name
+    return typeof name === 'string' && name.length > 0 ? [name] : []
+  })
+  return [...new Set(names)]
 }
 
 export function trimSlash(url: string): string {

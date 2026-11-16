@@ -106,6 +106,17 @@ export class PolzaStore {
     await this.refresh()
   }
 
+  async modelProviders(model: string): Promise<string[]> {
+    return (await call<{ providers: string[] }>(`model-providers?model=${encodeURIComponent(model)}`)).providers
+  }
+
+  async saveModelProvider(model: string, provider: string | null): Promise<void> {
+    const { prefs } = await call<{ prefs: PolzaPrefs }>(`model-providers?model=${encodeURIComponent(model)}`, {
+      method: 'POST', body: { provider },
+    })
+    if (this.snapshot.state !== null) this.set({ state: { ...this.snapshot.state, prefs } })
+  }
+
   pickerIcons(): Promise<Record<string, string>> {
     return call<{ models: Record<string, string> }>('icons').then(data => data.models)
   }

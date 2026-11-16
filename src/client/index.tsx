@@ -11,6 +11,7 @@ import { injectCss, pickerIconsCss, PolzaMark } from './brand.tsx'
 import { BalanceChip, ModelsFooterCard } from './Chip.tsx'
 import { DICTIONARIES, NS } from './locale.ts'
 import type { T } from './locale.ts'
+import { ModelProviderControl } from './ModelProvider.tsx'
 import { PolzaSection } from './Section.tsx'
 import { SpendPill } from './Spend.tsx'
 import { MediaToolView, QuotaNotice } from './Notices.tsx'
@@ -69,6 +70,11 @@ export function apply(ctx: Context): void {
     name: 'sidebar.footer.action', id: 'polza-balance', locale: NS,
     inject: () => ({ store }),
   }, BalanceChip as never))
+
+  slots.inject('conversation.input.right', () => slots.register({
+    name: 'conversation.input.right', id: 'polza-model-provider', locale: NS,
+    inject: () => ({ store }),
+  }, ModelProviderControl as never))
 
   slots.inject('conversation.composer.dock', () => slots.register({
     name: 'conversation.composer.dock', id: 'polza-spend', order: 5, locale: NS,

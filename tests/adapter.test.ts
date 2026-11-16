@@ -34,10 +34,10 @@ beforeAll(async () => {
 })
 afterAll(() => { server.close() })
 
-function adapter() {
+function adapter(modelProvider?: (id: string) => string | undefined) {
   const catalog = parsePolzaCatalog(JSON.parse(readFileSync(new URL('./fixtures/catalog.json', import.meta.url), 'utf8')))
   const models = catalog.map(model => toPiModel(model, 'polza', baseUrl))
-  const profiles = new Map([['polza', buildPolzaProfile({ models, keyRef: credentialRef('POLZA_API_KEY') })]])
+  const profiles = new Map([['polza', buildPolzaProfile({ models, keyRef: credentialRef('POLZA_API_KEY'), modelProvider })]])
   return new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve('pza_test_key_123456'), auth: POLZA_AUTH })
 }
 
@@ -49,6 +49,25 @@ describe('polza route on PiAiAdapter', () => {
     const info = await llm.resolveModel('polza', 'anthropic/claude-sonnet-5.5')
     expect(info.reasoning?.efforts.map(effort => effort.id)).toEqual(['low', 'medium', 'high'])
     expect(info.context?.contextWindow).toBe(1_000_000)
+  })
+
+  it('applies the selected upstream to prepared calls and drops it in auto mode', async () => {
+    const model = 'anthropic/claude-sonnet-5.5'
+    let selected: string | undefined = 'amazon-bedrock/eu-west-1'
+    const call = await adapter(id => id === model ? selected : undefined).prepareCall('polza', model)
+    const run = async () => {
+      const chunks: StreamChunk[] = []
+      for await (const chunk of call.stream({
+        provider: 'polza',
+        model,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Привет' }] }],
+      } as never)) chunks.push(chunk)
+      expect(chunks.at(-1)?.type).toBe('finish')
+      return requests.at(-1)?.body
+    }
+    expect(await run()).toMatchObject({ model, provider: { only: ['amazon-bedrock/eu-west-1'] } })
+    selected = undefined
+    expect(await run()).not.toHaveProperty('provider')
   })
 
   it('streams text and usage with the Polza wire dialect', async () => {
@@ -65,6 +84,7 @@ describe('polza route on PiAiAdapter', () => {
     expect(request?.auth).toBe('Bearer pza_test_key_123456')
     expect(request?.body).toMatchObject({ model: 'anthropic/claude-sonnet-5.5', stream: true, max_tokens: 1000, reasoning: { effort: 'high' } })
     expect(request?.body).not.toHaveProperty('store')
+    expect(request?.body).not.toHaveProperty('provider')
 
     const text = chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => (chunk as { text: string }).text).join('')
     expect(text).toBe('Привет из Пользы')

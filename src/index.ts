@@ -153,6 +153,9 @@ export function apply(ctx: Context, config: Config): void {
     () => { memo = undefined; modelsUpdated() },
   )
 
+  const prefs = new PrefsStore(join(dshHome(), 'polza', 'settings.json'))
+  ctx.effect(() => { void prefs.load(); return () => {} }, 'polza: prefs')
+
   const reportedMissing = new Set<string>()
   let memo: { whitelist: readonly string[]; profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile> } | undefined
 
@@ -170,7 +173,10 @@ export function apply(ctx: Context, config: Config): void {
         ctx.logger.warn(`${LOG} модели «${id}» нет в каталоге Пользы — пропущена`)
       }
     }
-    const profile = buildPolzaProfile({ models: routeModels, keyRef, retryPath: `${name}.retryPolicy` })
+    const profile = buildPolzaProfile({
+      models: routeModels, keyRef, retryPath: `${name}.retryPolicy`,
+      modelProvider: id => prefs.current().modelProviders[id],
+    })
     memo = { whitelist, profiles: new Map([[PROVIDER, profile]]) }
     return memo.profiles
   }
@@ -220,9 +226,6 @@ export function apply(ctx: Context, config: Config): void {
     void catalog.start()
     return () => { clearInterval(timer) }
   })
-
-  const prefs = new PrefsStore(join(dshHome(), 'polza', 'settings.json'))
-  ctx.effect(() => { void prefs.load(); return () => {} }, 'polza: prefs')
 
   // Служебные вызовы (заголовок сессии, сжатие контекста) на маршруте polza — дешёвой модели из настроек.
   const redirected = new WeakSet<object>()
