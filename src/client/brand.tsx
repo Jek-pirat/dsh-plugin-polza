@@ -67,9 +67,6 @@ export const CSS = `
 .pz-warn{color:var(--dsw-alias-state-warn-label);font:var(--dsw-font-xs-13)}
 .pz-chip.low,.pz-chip.low b{color:var(--dsw-alias-state-warn-label)}
 .pz-pill{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:12px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xxs-12);white-space:nowrap;cursor:default}
-.pz-model-provider{order:1;display:inline-flex;align-items:center;gap:4px;position:relative;white-space:nowrap;color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xxs-12)}
-.pz-model-provider select{max-width:clamp(80px,16vw,156px);height:26px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);padding:0 4px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;text-overflow:ellipsis}
-.pz-model-provider .pz-error{position:absolute;z-index:1;bottom:100%;right:0;width:max-content;max-width:240px;white-space:normal;background:var(--dsw-alias-bg-layer-1);padding:4px 8px}
 .pz-pill.warn{color:var(--dsw-alias-state-warn-label)}
 .pz-pill-sep{opacity:.5}
 .pz-pop-anchor{position:relative;display:inline-flex;outline:none}

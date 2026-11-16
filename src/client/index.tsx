@@ -11,7 +11,8 @@ import { injectCss, pickerIconsCss, PolzaMark } from './brand.tsx'
 import { BalanceChip, ModelsFooterCard } from './Chip.tsx'
 import { DICTIONARIES, NS } from './locale.ts'
 import type { T } from './locale.ts'
-import { ModelProviderControl } from './ModelProvider.tsx'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import { ModelSelect } from './model-picker/ModelSelect.tsx'
 import { PolzaSection } from './Section.tsx'
 import { SpendPill } from './Spend.tsx'
 import { MediaToolView, QuotaNotice } from './Notices.tsx'
@@ -71,10 +72,29 @@ export function apply(ctx: Context): void {
     inject: () => ({ store }),
   }, BalanceChip as never))
 
-  slots.inject('conversation.input.right', () => slots.register({
-    name: 'conversation.input.right', id: 'polza-model-provider', locale: NS,
-    inject: () => ({ store }),
-  }, ModelProviderControl as never))
+  // The stock picker seat owns its label slot exclusively. Reuse the stock
+  // directory and locale with our higher-priority composer picker.
+  ctx.inject(['modelDirectories', 'sessions'], scope => {
+    const directories = scope.modelDirectories
+    const sessions = scope.sessions
+    slots.inject('conversation.input.model', () => slots.register({
+      name: 'conversation.input.model', priority: -1, locale: 'model',
+      inject: (sessionId: Parameters<typeof directories.directoryFor>[0]) => {
+        const directory = directories.directoryFor(sessionId)
+        const available = sessions.subagentAddress(sessionId) === undefined
+        return {
+          available,
+          directory: directory.store,
+          load: () => { if (available) void directory.load().catch(() => {}) },
+          select: (selection: Parameters<typeof directory.select>[0]) =>
+            available ? directory.select(selection) : Promise.resolve(undefined),
+          resolveText: (label: Parameters<typeof scope.locale.resolveText>[0]) => scope.locale.resolveText(label),
+          store,
+          providerT: t,
+        }
+      },
+    }, ModelSelect as never))
+  })
 
   slots.inject('conversation.composer.dock', () => slots.register({
     name: 'conversation.composer.dock', id: 'polza-spend', order: 5, locale: NS,

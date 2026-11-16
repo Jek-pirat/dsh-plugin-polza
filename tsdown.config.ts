@@ -20,6 +20,7 @@ export default defineConfig([
     entry: { 'client.raw': 'src/client/index.tsx' },
     outDir: 'lib',
     format: 'cjs',
+    css: { fileName: 'model-picker.css' },
     platform: 'browser',
     target: 'es2022',
     dts: false,
