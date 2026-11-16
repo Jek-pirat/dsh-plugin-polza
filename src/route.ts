@@ -54,45 +54,24 @@ export interface PolzaProfileInput {
   modelProviders?: (modelId: string) => readonly string[] | undefined
 }
 
-/** A provider-specific refusal allows the next pinned route before any stream starts. */
-async function canTryNextProvider(response: Response): Promise<boolean> {
-  if ((response.status !== 503 && response.status !== 429) || response.headers.has('retry-after')) return false
-  const body = await response.clone().json().catch(() => null) as {
-    error?: { code?: unknown; metadata?: { provider_name?: unknown } }
-  } | null
-  if (response.status === 503) return body?.error?.code === 'SERVICE_UNAVAILABLE'
-  return body?.error?.code === 'TOO_MANY_REQUESTS' && typeof body.error.metadata?.provider_name === 'string'
-}
-
-// With several routes in one request, Polza can pick a cached endpoint
-// before the first requested route. Pin each attempt on the wire.
-function fetchInProviderOrder(providers: readonly string[], fetchImpl: typeof fetch): typeof fetch {
-  return async (resource, init) => {
-    // pi-ai's Chat Completions SDK passes its serialized body in RequestInit.
-    if (typeof init?.body !== 'string') throw new Error('Польза: не удалось закрепить провайдера в теле запроса')
-    const body = JSON.parse(init.body) as Record<string, unknown>
-    for (const [index, provider] of providers.entries()) {
-      init.signal?.throwIfAborted()
-      const response = await fetchImpl(resource, {
-        ...init,
-        body: JSON.stringify({ ...body, provider: { only: [provider], allow_fallbacks: false } }),
-      })
-      if (index === providers.length - 1 || !(await canTryNextProvider(response))) return response
-      await response.body?.cancel()
-    }
-    throw new Error('Польза: список провайдеров пуст')
-  }
-}
-
 export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProviderProfile {
   const provider = input.provider ?? POLZA_PROVIDER_ID
   const displayName = input.displayName ?? 'Polza'
   const api = openAICompletionsApi()
   const models = [...input.models]
-  function withProvider<T extends { fetch?: typeof fetch }>(modelId: string, options?: T): T | undefined {
+  function withProvider<T extends { onPayload?: (payload: unknown, model: Model<Api>) => unknown }>(
+    modelId: string,
+    options?: T,
+  ): T | undefined {
     const selected = input.modelProviders?.(modelId)
     if (!selected?.length) return options
-    return { ...options, fetch: fetchInProviderOrder(selected, options?.fetch ?? fetch) } as T
+    return {
+      ...options,
+      onPayload: async (payload: unknown, model: Model<Api>) => {
+        const body = await options?.onPayload?.(payload, model) ?? payload
+        return { ...body as Record<string, unknown>, provider: { only: selected, order: selected, allow_fallbacks: true } }
+      },
+    } as T
   }
   const piProvider = {
     id: provider,
