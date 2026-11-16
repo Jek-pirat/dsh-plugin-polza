@@ -10,8 +10,8 @@ export interface PolzaPrefs {
   sideModel: string | null
   /** Порог «мало денег» в рублях для предупреждения. */
   lowBalanceRub: number
-  /** Явный маршрут для модели. Отсутствие записи включает автомаршрутизацию. */
-  modelProviders: Record<string, string>
+  /** Маршруты в порядке приоритета. Отсутствие записи включает автомаршрутизацию. */
+  modelProviders: Record<string, readonly string[]>
 }
 
 const DEFAULTS: PolzaPrefs = { sideModel: DEFAULT_SIDE_MODEL, lowBalanceRub: 50, modelProviders: {} }
@@ -37,11 +37,11 @@ export class PrefsStore {
     return this.transact(current => normalize({ ...current, ...patch, modelProviders: current.modelProviders }))
   }
 
-  setModelProvider(model: string, provider: string | null): Promise<PolzaPrefs> {
+  setModelProviders(model: string, providers: readonly string[]): Promise<PolzaPrefs> {
     return this.transact(current => {
       const modelProviders = { ...current.modelProviders }
-      if (provider === null) delete modelProviders[model]
-      else modelProviders[model] = provider
+      if (providers.length === 0) delete modelProviders[model]
+      else modelProviders[model] = [...providers]
       return { ...current, modelProviders }
     })
   }
@@ -63,8 +63,12 @@ function normalize(raw: Record<string, unknown>): PolzaPrefs {
   const low = raw['lowBalanceRub']
   const providers = raw['modelProviders']
   const modelProviders = providers !== null && typeof providers === 'object'
-    ? Object.fromEntries(Object.entries(providers).filter(([model, provider]) =>
-      polzaModelSlugSchema.safeParse(model).success && typeof provider === 'string' && provider.length > 0))
+    ? Object.fromEntries(Object.entries(providers).flatMap(([model, value]) => {
+      if (!polzaModelSlugSchema.safeParse(model).success) return []
+      const entries: unknown[] = Array.isArray(value) ? value : [value]
+      const names = [...new Set(entries.filter((name): name is string => typeof name === 'string' && name.trim() !== ''))]
+      return names.length === 0 ? [] : [[model, names] as const]
+    }))
     : {}
   return {
     modelProviders,

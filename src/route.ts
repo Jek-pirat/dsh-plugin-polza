@@ -51,7 +51,7 @@ export interface PolzaProfileInput {
   provider?: string
   displayName?: string
   retryPath?: string
-  modelProvider?: (modelId: string) => string | undefined
+  modelProviders?: (modelId: string) => readonly string[] | undefined
 }
 
 export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProviderProfile {
@@ -63,13 +63,13 @@ export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProvide
     modelId: string,
     options?: T,
   ): T | undefined {
-    const selected = input.modelProvider?.(modelId)
-    if (selected === undefined) return options
+    const selected = input.modelProviders?.(modelId)
+    if (!selected?.length) return options
     return {
       ...options,
       onPayload: async (payload: unknown, model: Model<Api>) => {
         const body = await options?.onPayload?.(payload, model) ?? payload
-        return { ...body as Record<string, unknown>, provider: { only: [selected] } }
+        return { ...body as Record<string, unknown>, provider: { only: selected, order: selected, allow_fallbacks: true } }
       },
     } as T
   }

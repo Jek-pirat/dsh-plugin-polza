@@ -278,6 +278,49 @@
   cursor: default;
 }
 
+.providerRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.providerRow .option {
+  min-width: 0;
+  flex: 1;
+}
+
+.providerRank {
+  flex: 0 0 18px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.providerMove {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.providerMove:focus-visible,
+.providerMove:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.providerMove[aria-disabled="true"],
+.providerMove:disabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: default;
+}
+
 .optionCopy {
   display: flex;
   flex: 1;

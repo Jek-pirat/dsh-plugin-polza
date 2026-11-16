@@ -175,7 +175,7 @@ export function apply(ctx: Context, config: Config): void {
     }
     const profile = buildPolzaProfile({
       models: routeModels, keyRef, retryPath: `${name}.retryPolicy`,
-      modelProvider: id => prefs.current().modelProviders[id],
+      modelProviders: id => prefs.current().modelProviders[id],
     })
     memo = { whitelist, profiles: new Map([[PROVIDER, profile]]) }
     return memo.profiles

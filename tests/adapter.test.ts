@@ -34,10 +34,10 @@ beforeAll(async () => {
 })
 afterAll(() => { server.close() })
 
-function adapter(modelProvider?: (id: string) => string | undefined) {
+function adapter(modelProviders?: (id: string) => readonly string[] | undefined) {
   const catalog = parsePolzaCatalog(JSON.parse(readFileSync(new URL('./fixtures/catalog.json', import.meta.url), 'utf8')))
   const models = catalog.map(model => toPiModel(model, 'polza', baseUrl))
-  const profiles = new Map([['polza', buildPolzaProfile({ models, keyRef: credentialRef('POLZA_API_KEY'), modelProvider })]])
+  const profiles = new Map([['polza', buildPolzaProfile({ models, keyRef: credentialRef('POLZA_API_KEY'), modelProviders })]])
   return new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve('pza_test_key_123456'), auth: POLZA_AUTH })
 }
 
@@ -51,9 +51,9 @@ describe('polza route on PiAiAdapter', () => {
     expect(info.context?.contextWindow).toBe(1_000_000)
   })
 
-  it('applies the selected upstream to prepared calls and drops it in auto mode', async () => {
+  it('preserves upstream priority for prepared calls and drops routing in auto mode', async () => {
     const model = 'anthropic/claude-sonnet-5.5'
-    let selected: string | undefined = 'amazon-bedrock/eu-west-1'
+    let selected = ['amazon-bedrock/eu-west-1', 'anthropic']
     const call = await adapter(id => id === model ? selected : undefined).prepareCall('polza', model)
     const run = async () => {
       const chunks: StreamChunk[] = []
@@ -65,8 +65,14 @@ describe('polza route on PiAiAdapter', () => {
       expect(chunks.at(-1)?.type).toBe('finish')
       return requests.at(-1)?.body
     }
-    expect(await run()).toMatchObject({ model, provider: { only: ['amazon-bedrock/eu-west-1'] } })
-    selected = undefined
+    expect((await run())?.provider).toEqual({
+      only: ['amazon-bedrock/eu-west-1', 'anthropic'],
+      order: ['amazon-bedrock/eu-west-1', 'anthropic'],
+      allow_fallbacks: true,
+    })
+    selected = ['anthropic', 'amazon-bedrock/eu-west-1']
+    expect((await run())?.provider).toMatchObject({ order: ['anthropic', 'amazon-bedrock/eu-west-1'] })
+    selected = []
     expect(await run()).not.toHaveProperty('provider')
   })
 

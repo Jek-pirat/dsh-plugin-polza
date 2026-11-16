@@ -35,7 +35,7 @@ import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import {
-  IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconCloseFillRegular,
+  IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconChevronUpOutlineRegular, IconCloseFillRegular,
   IconDataOutlineRegular, IconWarningOutlineRegular, Input, isMobileDevice, rankByName, StateDot, Tag, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -140,6 +140,11 @@ export function ModelSelect(
   const currentChoice = choices[selectedIndex]
   const polzaModel = currentChoice?.selection.provider === 'polza' ? currentChoice.selection.model : undefined
   const upstream = useModelProvider(store, polzaModel, open && pane === 'provider')
+  const providerSummary = upstream.selected.join(', ') || providerT('providerAuto')
+  const providerRows = pane === 'provider'
+    ? [...upstream.selected, ...upstream.providers.filter(provider => !upstream.selected.includes(provider))]
+    : []
+  const providerLocked = locked || state.pending !== null || !upstream.ready
   const reasoning = currentChoice?.model.reasoning
   const effectiveEffort = state.current?.reasoningEffort ?? reasoning?.defaultEffort
   const effortLabel = currentChoice === undefined
@@ -205,7 +210,7 @@ export function ModelSelect(
       }
       // The checked row is the value in use; a pane without one opens on its
       // first row.
-      const checked = menuRef.current?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]:not([disabled])')
+      const checked = menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]:not([disabled])')
       const target = checked ?? itemRefs.current.find(item => item !== null && !item.disabled)
       // Rows a selection in flight disabled cannot take the keyboard; the
       // trigger does, so the card's keys still reach the menu.
@@ -279,7 +284,7 @@ export function ModelSelect(
   }
 
   const moveFocus = (offset: number): void => {
-    const items = itemRefs.current.filter(item => item !== null)
+    const items = itemRefs.current.filter(item => item !== null && !item.disabled && item.getAttribute('aria-disabled') !== 'true')
     if (items.length === 0) return
     const active = items.findIndex(item => item === document.activeElement)
     // Focus outside the rows (the trigger, which keeps it while the menu
@@ -346,7 +351,7 @@ export function ModelSelect(
         searchRef.current?.focus()
         return
       }
-      const checked = menuRef.current?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]:not([disabled])')
+      const checked = menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]:not([disabled])')
       ;(checked ?? rows.find(item => !item.disabled))?.focus()
       return
     }
@@ -497,7 +502,7 @@ export function ModelSelect(
           style={menuPos ?? MEASURE_STYLE}
           role={pane === 'model' ? 'group' : 'menu'}
           aria-label={pane === 'provider' ? providerT('provider') : t('menu.aria')}
-          aria-busy={state.status === 'loading' || busy}
+          aria-busy={state.status === 'loading' || busy || (pane === 'provider' && upstream.saving)}
         >
           {pane === 'root' && (
             <>
@@ -512,7 +517,7 @@ export function ModelSelect(
                 <button ref={itemRef()} type="button" role="menuitem" className={css.cell}
                   onClick={() => { drill('provider') }}>
                   <span className={css.cellLabel}>{providerT('provider')}</span>
-                  <span className={css.cellValue}>{upstream.selected || providerT('providerAuto')}</span>
+                  <span className={css.cellValue} title={providerSummary}>{providerSummary}</span>
                   <IconChevronRightOutlineRegular className={css.cellChevron} />
                 </button>
               )}
@@ -637,23 +642,53 @@ export function ModelSelect(
               </div>}
               {upstream.status === 'loading' && <div className={css.status} role="status">{providerT('providerLoading')}</div>}
               <div className={clsx(css.groups, 'scrollable')}>
-                {['', ...upstream.providers].map(provider => {
-                  const selected = upstream.selected === provider
+                {providerRows.map((provider, index) => {
+                  const selected = index < upstream.selected.length
                   return (
-                    <button ref={itemRef()} key={provider} type="button" role="menuitemradio"
-                      aria-checked={selected} className={clsx(css.option, selected && css.selected)}
-                      disabled={locked || busy || !upstream.ready}
-                      aria-disabled={upstream.saving || undefined}
-                      onClick={() => {
-                        if (upstream.saving) return
-                        if (selected) { back('provider'); return }
-                        void upstream.save(provider).then(saved => { if (saved) closeAfterSelection() })
-                      }}>
-                      <span className={css.optionCopy}><span className={css.modelName}>{provider || providerT('providerAuto')}</span></span>
-                      <span className={css.check}>{selected && <IconCheckOutlineRegular />}</span>
-                    </button>
+                    <div key={provider} role="none" className={css.providerRow}>
+                      <button ref={itemRef()} type="button" role="menuitemcheckbox" aria-checked={selected}
+                        className={clsx(css.option, selected && css.selected)}
+                        disabled={providerLocked} aria-disabled={upstream.saving || undefined}
+                        title={provider}
+                        onClick={() => {
+                          const next = selected
+                            ? upstream.selected.filter(name => name !== provider)
+                            : [...upstream.selected, provider]
+                          void upstream.save(next)
+                        }}>
+                        {selected && <span aria-hidden="true" className={css.providerRank}>{index + 1}</span>}
+                        <span className={css.optionCopy}><span className={css.modelName}>{provider}</span></span>
+                        <span className={css.check}>{selected && <IconCheckOutlineRegular />}</span>
+                      </button>
+                      {selected && upstream.selected.length > 1 && [-1, 1].map(offset => {
+                        const target = index + offset
+                        const blocked = upstream.saving || target < 0 || target >= upstream.selected.length
+                        const label = providerT(offset < 0 ? 'providerUp' : 'providerDown', { provider })
+                        return (
+                          <button ref={itemRef()} key={offset} type="button" role="menuitem"
+                            className={css.providerMove} aria-label={label} title={label}
+                            disabled={providerLocked} aria-disabled={blocked}
+                            onClick={() => {
+                              if (blocked) return
+                              const next = [...upstream.selected]
+                              next.splice(index, 1)
+                              next.splice(target, 0, provider)
+                              void upstream.save(next)
+                            }}>
+                            {offset < 0 ? <IconChevronUpOutlineRegular size={14} /> : <IconChevronDownOutlineRegular size={14} />}
+                          </button>
+                        )
+                      })}
+                    </div>
                   )
                 })}
+                <button ref={itemRef()} type="button" role="menuitemradio"
+                  aria-checked={upstream.selected.length === 0} className={css.option}
+                  disabled={providerLocked} aria-disabled={upstream.saving || undefined}
+                  onClick={() => { if (upstream.selected.length > 0) void upstream.save([]) }}>
+                  <span className={css.optionCopy}><span className={css.modelName}>{providerT('providerAuto')}</span></span>
+                  <span className={css.check}>{upstream.selected.length === 0 && <IconCheckOutlineRegular />}</span>
+                </button>
               </div>
             </>
           )}

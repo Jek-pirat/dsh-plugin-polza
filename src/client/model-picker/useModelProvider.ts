@@ -1,5 +1,7 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PolzaStore } from '../api.ts'
+
+const EMPTY: readonly string[] = []
 
 export function useModelProvider(store: PolzaStore, model: string | undefined, open: boolean) {
   const { state } = useSyncExternalStore(store.subscribe, store.getSnapshot)
@@ -8,6 +10,7 @@ export function useModelProvider(store: PolzaStore, model: string | undefined, o
   const [saveError, setSaveError] = useState<string>()
   const [reloadCount, setReloadCount] = useState(0)
   const [saving, setSaving] = useState(false)
+  const savePending = useRef(false)
 
   useEffect(() => {
     if (!open || model === undefined) return
@@ -26,24 +29,24 @@ export function useModelProvider(store: PolzaStore, model: string | undefined, o
   const loadFailed = loadError !== undefined && loadError === model
 
   return {
-    selected: model === undefined ? '' : state?.prefs.modelProviders[model] ?? '',
-    providers: loaded ? list.providers : [],
+    selected: model === undefined ? EMPTY : state?.prefs.modelProviders[model] ?? EMPTY,
+    providers: loaded ? list.providers : EMPTY,
     status: loaded || loadFailed ? 'idle' : 'loading',
     error: saveError !== undefined && saveError === model ? 'save' : loadFailed ? 'load' : null,
     ready,
     saving,
     reload: () => { setReloadCount(count => count + 1) },
-    save: async (provider: string) => {
-      if (model === undefined) return false
+    save: async (providers: readonly string[]) => {
+      if (model === undefined || savePending.current) return
+      savePending.current = true
       setSaving(true)
       setSaveError(undefined)
       try {
-        await store.saveModelProvider(model, provider || null)
-        return true
+        await store.saveModelProviders(model, providers)
       } catch {
         setSaveError(model)
-        return false
       } finally {
+        savePending.current = false
         setSaving(false)
       }
     },

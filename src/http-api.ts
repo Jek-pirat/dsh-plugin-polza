@@ -211,12 +211,18 @@ export class PolzaApi {
       { path: `${API_PREFIX}/model-providers`, methods: ['GET', 'POST'], fetch: guard(async request => {
         const model = polzaModelSlugSchema.parse(new URL(request.url).searchParams.get('model'))
         if (request.method === 'GET') return json({ providers: await fetchModelProviders(this.deps.baseUrl, model) })
-        const provider = (await body(request))['provider']
-        if (provider !== null && (typeof provider !== 'string'
-          || !(await fetchModelProviders(this.deps.baseUrl, model)).includes(provider))) {
-          return json({ error: 'Провайдер недоступен для этой модели' }, 400)
+        const providers = (await body(request))['providers']
+        if (!Array.isArray(providers) || !providers.every((name: unknown): name is string =>
+          typeof name === 'string' && name.trim() !== '') || new Set(providers).size !== providers.length) {
+          return json({ error: 'Ожидался список уникальных провайдеров' }, 400)
         }
-        const prefs = await this.deps.prefs.setModelProvider(model, provider)
+        const previous = this.deps.prefs.current().modelProviders[model] ?? []
+        const added = providers.filter(name => !previous.includes(name))
+        if (added.length > 0) {
+          const available = await fetchModelProviders(this.deps.baseUrl, model)
+          if (added.some(name => !available.includes(name))) return json({ error: 'Провайдер недоступен для этой модели' }, 400)
+        }
+        const prefs = await this.deps.prefs.setModelProviders(model, providers)
         return json({ prefs })
       }) },
       { path: `${API_PREFIX}/spend`, methods: ['GET'], fetch: guard(async request => json({ spend: this.spendOf(new URL(request.url).searchParams.get('session') ?? '') })) },
