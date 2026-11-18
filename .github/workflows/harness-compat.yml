@@ -26,15 +26,28 @@ jobs:
       - name: Проверка на новой версии
         if: steps.v.outputs.latest != steps.v.outputs.pinned
         run: |
-          npm ci
-          v=${{ steps.v.outputs.latest }}
-          pkgs=$(node -p 'Object.keys(require("./package.json").devDependencies).filter(n=>n.startsWith("@deepseek-ai/dsh-")).map(n=>n+"@'$v'").join(" ")')
-          npm install --no-save --save-exact $pkgs
+          # Поднимаем пакеты harness и в dev-, и в peer-зависимостях: иначе peer на старой версии даёт ERESOLVE,
+          # и проверка падает до типов (так было на rc.2/rc.3).
+          V=${{ steps.v.outputs.latest }} node -e '
+            const fs = require("fs"); const p = JSON.parse(fs.readFileSync("package.json"))
+            for (const k of ["devDependencies", "peerDependencies"])
+              for (const n in p[k] ?? {}) if (n.startsWith("@deepseek-ai/dsh-")) p[k][n] = process.env.V
+            fs.writeFileSync("package.json", JSON.stringify(p, null, 2))'
+          rm package-lock.json
+          npm install --no-audit --no-fund
           npm run typecheck && npm test && npm run build
       - name: Issue о несовместимости
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue create --title "DeepSeek Harness ${{ steps.v.outputs.latest }}: плагин не собирается" \
-            --body "Проверка harness-compat упала на ${{ steps.v.outputs.latest }} (зафиксирована ${{ steps.v.outputs.pinned }}). Лог: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" || true
+          # Одна открытая issue на версию: повторные падения — комментарием, а не новой issue.
+          title="DeepSeek Harness ${{ steps.v.outputs.latest }}: плагин не собирается"
+          log="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "Снова упала. Лог: $log" || true
+          else
+            gh issue create --title "$title" \
+              --body "Проверка harness-compat упала на ${{ steps.v.outputs.latest }} (зафиксирована ${{ steps.v.outputs.pinned }}). Лог: $log" || true
+          fi
