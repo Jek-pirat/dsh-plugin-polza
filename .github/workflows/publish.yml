@@ -1,29 +1,31 @@
-# Публикация в npm по тегу vX.Y.Z через доверенную публикацию npm (OIDC, без токена в секретах).
-# Один раз: npmjs.com → @polza-ai/dsh-plugin-polza → Settings → Trusted publishing →
-# GitHub Actions, репозиторий polza-ai/dsh-plugin-polza, workflow publish.yml.
 name: publish
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 permissions:
   contents: write
   id-token: write
 jobs:
   publish:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm install -g npm@latest
       - run: npm ci
-      - name: Тег совпадает с версией пакета
-        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
-      - run: npm run typecheck && npm test
-      - run: npm publish --provenance --access public
-      - name: Релиз на GitHub
+      - run: npm run typecheck && npm test && npm run build
+      - name: Проверить содержимое и выпустить пакет
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag || true
+        run: bash scripts/publish.sh

@@ -61,9 +61,7 @@
 
 ## Публикация
 - npm: `@polza-ai/dsh-plugin-polza` (организация polza-ai, `publishConfig.access: public`), GitHub `polza-ai/dsh-plugin-polza`.
-- Релиз: поднять `version`, `npm run typecheck && npm test`, проверить tarball (`npm pack` → изолированный `DSH_HOME`,
-  `"$DSH" plugin --profile web add <tgz>` → `"$DSH" web`), коммит, тег `vX.Y.Z` **до** `npm publish`, push main+тег,
-  `gh release create`. Тег `v0.1.0` на GitHub указывает на коммит до переименования пакета (npm 0.1.0 собран из d01cbdd).
+- После push в main workflow publish.yml проверяет сборку и сравнивает содержимое npm-пакета с latest. Изменения выпускаются как patch. Для ручного minor/major обновить версию и отправить соответствующий тег vX.Y.Z. Прерванный выпуск можно повторить через workflow_dispatch на main.
 - Пользователи ставят: Плагины → Добавить плагин → `@polza-ai/dsh-plugin-polza` (собранный пакет, без allowBuilds).
 - У Ильи в профиле desktop — link на эту папку (не npm-версия).
 
