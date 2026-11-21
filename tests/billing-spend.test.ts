@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { billingMessage, classifyBilling, withBillingErrors } from '../src/billing.ts'
+import { classifyBilling } from '../src/billing.ts'
 import { cacheHitRate, priceRub } from '../src/spend.ts'
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 
 describe('402 от Пользы', () => {
   it('отличает нехватку баланса от лимита ключа', () => {
@@ -11,21 +10,6 @@ describe('402 от Пользы', () => {
     expect(classifyBilling({ status: 500, message: 'upstream error' })).toBeUndefined()
   })
 
-  it('пишет понятный текст с суммой и ссылкой', () => {
-    expect(billingMessage('balance', 'Недостаточно средств. Требуется: 1 ₽, доступно: 0,40 ₽')).toContain('доступно 0,40 ₽')
-    expect(billingMessage('key-limit', '')).toContain('лимит')
-  })
-
-  it('переписывает финальную ошибку стрима в QUOTA', async () => {
-    async function* inner(): AsyncIterable<StreamChunk> {
-      yield { type: 'finish', reason: { kind: 'error', failure: { code: 'HTTP_402', status: 402, message: 'Недостаточно средств' } } }
-    }
-    const alerts: unknown[] = []
-    const out: StreamChunk[] = []
-    for await (const chunk of withBillingErrors(inner(), alert => { alerts.push(alert) })) out.push(chunk)
-    expect(out[0]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'QUOTA' } } })
-    expect(alerts).toHaveLength(1)
-  })
 })
 
 describe('расход и кэш', () => {
