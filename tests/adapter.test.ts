@@ -9,14 +9,39 @@ import { readFileSync } from 'node:fs'
 import { parsePolzaCatalog } from '../src/contract.ts'
 import { toPiModel } from '../src/models.ts'
 import { buildPolzaProfile, POLZA_AUTH } from '../src/route.ts'
+import { withGatewayErrors } from '../src/gateway-errors.ts'
 
 const requests: { auth: string | undefined; body: Record<string, unknown> }[] = []
 let baseUrl = ''
+const balanceMessage = 'Недостаточно средств. Требуется: 1 ₽, доступно: 0,40 ₽ (баланс: 0,40 ₽)'
+const keyLimitMessage = 'Достигнут дневной лимит по сумме. Доступно: 0,40 ₽'
+const testApiKey = 'pza_test_key_123456'
+const gatewayFailures = [
+  { name: 'validation', status: 400, payload: { error: { message: 'Поле temperature должно быть числом' } }, message: 'Поле temperature должно быть числом', code: 'INVALID_REQUEST' },
+  { name: 'authentication', status: 401, payload: { message: `Ключ ${testApiKey} отозван` }, message: 'Ключ [REDACTED] отозван', code: 'POLZA_AUTH' },
+  { name: 'balance', status: 402, payload: { error: { code: 'INSUFFICIENT_BALANCE', message: balanceMessage } }, message: balanceMessage, code: 'POLZA_PAYMENT_REQUIRED', billing: 'balance' },
+  { name: 'key limit', status: 402, payload: { error: { code: 'INSUFFICIENT_BALANCE', message: keyLimitMessage } }, message: keyLimitMessage, code: 'POLZA_PAYMENT_REQUIRED', billing: 'key-limit' },
+  { name: 'policy', status: 403, payload: { error: 'Ключу запрещён доступ к этой модели' }, message: 'Ключу запрещён доступ к этой модели', code: 'POLZA_AUTH' },
+  { name: 'not found', status: 404, payload: { detail: 'Указанный маршрут модели не найден' }, message: 'Указанный маршрут модели не найден', code: 'PI_AI_ERROR' },
+  { name: 'rate limit', status: 429, payload: { error: { message: 'Слишком много запросов. Повторите позже.' } }, message: 'Слишком много запросов. Повторите позже.', code: 'RATE_LIMIT' },
+  { name: 'quota', status: 429, payload: { error: { code: 'QUOTA_EXCEEDED', message: 'Quota exceeded for this model' } }, message: 'Quota exceeded for this model', code: 'POLZA_QUOTA' },
+  { name: 'plain text', status: 503, payload: 'Шлюз временно недоступен', message: 'Шлюз временно недоступен', code: 'SERVER' },
+  { name: 'json error in success response', status: 200, payload: { error: { message: 'Модель не запустилась' } }, message: 'Модель не запустилась' },
+  { name: 'sse', status: 200, stream: true, payload: { error: { message: 'Quota exhausted upstream' } }, message: 'Quota exhausted upstream', code: 'POLZA_QUOTA' },
+]
 const server = createServer((req, res) => {
   let raw = ''
   req.on('data', (chunk: Buffer) => { raw += chunk.toString() })
   req.on('end', () => {
-    requests.push({ auth: req.headers.authorization, body: JSON.parse(raw) as Record<string, unknown> })
+    const body = JSON.parse(raw) as Record<string, unknown>
+    requests.push({ auth: req.headers.authorization, body })
+    const failure = gatewayFailures.find(({ name }) => JSON.stringify(body.messages).includes(`gateway-test:${name}:`))
+    if (failure !== undefined) {
+      const plain = typeof failure.payload === 'string'
+      res.writeHead(failure.status, { 'content-type': failure.stream ? 'text/event-stream' : plain ? 'text/plain' : 'application/json' })
+      res.end(failure.stream ? `event: error\ndata: ${JSON.stringify(failure.payload)}\n\n` : plain ? failure.payload : JSON.stringify(failure.payload))
+      return
+    }
     res.writeHead(200, { 'content-type': 'text/event-stream' })
     const send = (data: unknown) => { res.write(`data: ${JSON.stringify(data)}\n\n`) }
     const base = { id: 'gen-1', object: 'chat.completion.chunk', created: 1, model: 'anthropic/claude-sonnet-5.5' }
@@ -38,10 +63,27 @@ function adapter(modelProviders?: (id: string) => readonly string[] | undefined)
   const catalog = parsePolzaCatalog(JSON.parse(readFileSync(new URL('./fixtures/catalog.json', import.meta.url), 'utf8')))
   const models = catalog.map(model => toPiModel(model, 'polza', baseUrl))
   const profiles = new Map([['polza', buildPolzaProfile({ models, keyRef: credentialRef('POLZA_API_KEY'), modelProviders })]])
-  return new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve('pza_test_key_123456'), auth: POLZA_AUTH })
+  return new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve(testApiKey), auth: POLZA_AUTH })
 }
 
 describe('polza route on PiAiAdapter', () => {
+  it('keeps each concurrent call’s gateway message and failure type', async () => {
+    const model = 'anthropic/claude-sonnet-5.5'
+    const call = await adapter().prepareCall('polza', model)
+    await Promise.all(gatewayFailures.map(async ({ name, status, message, code, billing }) => {
+      const alerts: unknown[] = []
+      const chunks: StreamChunk[] = []
+      for await (const chunk of withGatewayErrors(() => call.stream({
+        provider: 'polza', model,
+        messages: [{ role: 'user', content: [{ type: 'text', text: `gateway-test:${name}:` }] }],
+      } as never), alert => { alerts.push(alert) })) chunks.push(chunk)
+      expect(chunks.at(-1), name).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: {
+        message, ...(status >= 400 ? { status } : {}), ...(code === undefined ? {} : { code }),
+      } } })
+      expect(alerts, name).toEqual(billing === undefined ? [] : [{ kind: billing, message, at: expect.any(Number) }])
+    }))
+  })
+
   it('lists the configured models and resolves reasoning efforts', async () => {
     const llm = adapter()
     const listed = await llm.listModels('polza')

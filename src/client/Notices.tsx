@@ -1,26 +1,9 @@
-// Уведомление о деньгах (shell.quota-notice) и карточки генерации в чате (tool.call.toolview).
+// Карточки генерации в чате (tool.call.toolview).
 import { useEffect, useState } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PolzaStore } from './api.ts'
-import { PolzaBadge } from './brand.tsx'
 import type { T } from './locale.ts'
 
 export const DASHBOARD = 'https://polza.ai/dashboard'
-
-export function QuotaNotice({ t, store, message, dismiss }: { t: T; store: PolzaStore; message: string; dismiss: () => void }) {
-  const alert = store.getSnapshot().state?.alert
-  return (
-    <div className="pz-notice" role="alert">
-      <PolzaBadge size={28} />
-      <div className="pz-grow">
-        <div className="pz-title">{alert?.kind === 'key-limit' ? t('noticeLimitTitle') : t('noticeBalanceTitle')}</div>
-        <div className="pz-muted">{alert?.message ?? message}</div>
-      </div>
-      <Button variant="primary" size="sm" onClick={() => { window.open(DASHBOARD, '_blank', 'noopener,noreferrer') }}>{t('topUp')}</Button>
-      <Button variant="ghost" size="sm" onClick={() => { void store.refresh(true); dismiss() }}>{t('close')}</Button>
-    </div>
-  )
-}
 
 interface ImageRef { attachmentId: string; mediaType: string; bytes: number; width: number; height: number; name?: string }
 interface ToolViewProps {

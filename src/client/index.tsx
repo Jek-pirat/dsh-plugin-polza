@@ -15,7 +15,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { ModelSelect } from './model-picker/ModelSelect.tsx'
 import { PolzaSection } from './Section.tsx'
 import { SpendPill } from './Spend.tsx'
-import { MediaToolView, QuotaNotice } from './Notices.tsx'
+import { MediaToolView } from './Notices.tsx'
 import { IMAGE_TOOL, VIDEO_TOOL } from '../tool-names.ts'
 
 export const name = 'polza-ui'
@@ -100,13 +100,6 @@ export function apply(ctx: Context): void {
     name: 'conversation.composer.dock', id: 'polza-spend', order: 5, locale: NS,
     inject: (sessionId?: string) => ({ store, sessionId }),
   }, SpendPill as never))
-
-  slots.inject('shell.quota-notice', () => slots.register({
-    name: 'shell.quota-notice', locale: NS,
-    // Наше уведомление — только когда ошибку денег прислала Польза (иначе это другой провайдер).
-    select: (owner: { code: string }) => owner.code === 'QUOTA' && store.getSnapshot().state?.alert != null ? owner : null,
-    inject: () => ({ store }),
-  }, QuotaNotice as never))
 
   for (const key of [IMAGE_TOOL, VIDEO_TOOL]) {
     slots.inject('tool.call.toolview', () => slots.register({

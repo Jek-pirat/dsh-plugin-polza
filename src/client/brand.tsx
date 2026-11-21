@@ -80,7 +80,6 @@ export const CSS = `
 .pz-spend-models{border-top:1px solid var(--dsw-alias-border-l2);padding-top:6px;display:flex;flex-direction:column;gap:2px;color:var(--dsw-alias-label-secondary)}
 .pz-spend-models .pz-row{gap:8px}
 .pz-spend-models b{font-weight:500}
-.pz-notice{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l3);box-shadow:0 8px 24px rgba(0,0,0,.12);max-width:560px;font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary)}
 .pz-media{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);font:var(--dsw-font-s-14);color:var(--dsw-alias-label-primary)}
 .pz-thumbs{display:flex;gap:8px;flex-wrap:wrap}
 .pz-thumb{max-width:320px;max-height:320px;border-radius:var(--dsw-radius-sm);display:block;object-fit:contain;background:var(--dsw-alias-bg-layer-2)}

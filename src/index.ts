@@ -22,8 +22,8 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
 import { assertUsableApiKey, LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmModelInfo, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { withBillingErrors } from './billing.ts'
 import type { BillingAlert } from './billing.ts'
+import { withGatewayErrors } from './gateway-errors.ts'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-fs'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -87,10 +87,10 @@ class PolzaAdapter extends PiAiAdapter {
     super(options)
   }
 
-  private wrap(options: GenerateOptions, inner: AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk> {
+  private wrap(options: GenerateOptions, inner: () => AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk> {
     const hooks = this.hooks
     return (async function* () {
-      for await (const chunk of withBillingErrors(inner, hooks.billing)) {
+      for await (const chunk of withGatewayErrors(inner, hooks.billing)) {
         if (chunk.type === 'usage') hooks.usage(options, chunk)
         yield chunk
       }
@@ -98,12 +98,12 @@ class PolzaAdapter extends PiAiAdapter {
   }
 
   override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return this.wrap(options, super.stream(options))
+    return this.wrap(options, () => super.stream(options))
   }
 
   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
     const prepared = await super.prepareCall(provider, model, signal)
-    return { model: prepared.model, stream: options => this.wrap(options, prepared.stream(options)) }
+    return { model: prepared.model, stream: options => this.wrap(options, () => prepared.stream(options)) }
   }
 
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
