@@ -5,6 +5,7 @@ import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import type { Api, AuthContext, Credential, CredentialStore, Model, Provider } from '@earendil-works/pi-ai'
 import { POLZA_PROVIDER_ID } from './contract.ts'
+import { gatewayFetch } from './gateway-errors.ts'
 import { FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS, polzaCompat } from './models.ts'
 
 /** Учётки pi-ai этому маршруту не нужны: ключ приходит опцией запроса. */
@@ -79,8 +80,14 @@ export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProvide
     ...models[0] === undefined ? {} : { baseUrl: models[0].baseUrl },
     auth: harnessApiKeyAuth(),
     getModels: () => models,
-    stream: (model, context, options) => api.stream(model, context, withProvider(model.id, options)),
-    streamSimple: (model, context, options) => api.streamSimple(model, context, withProvider(model.id, options)),
+    stream: (model, context, options) => api.stream(model, context, {
+      ...withProvider(model.id, options),
+      fetch: gatewayFetch(options?.fetch ?? globalThis.fetch, options?.apiKey),
+    }),
+    streamSimple: (model, context, options) => api.streamSimple(model, context, {
+      ...withProvider(model.id, options),
+      fetch: gatewayFetch(options?.fetch ?? globalThis.fetch, options?.apiKey),
+    }),
   } as Provider
   return {
     provider,

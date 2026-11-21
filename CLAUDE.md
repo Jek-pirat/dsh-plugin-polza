@@ -39,8 +39,9 @@
 - Кэш через Пользу проверен 2026-11-10: 2-й ход Claude 93%, GPT 87%, DeepSeek 99% (`cacheReadTokens` в usage).
 - Служебная модель: слушатель `llm/stream` по `purpose` ∈ {session-title, compaction} на маршруте polza →
   `ctx.llm.stream({...options, model: side})` (копия, WeakSet от рекурсии; titles приходят frozen). Настройка — `$DSH_HOME/polza/settings.json`.
-- Деньги: 402 `INSUFFICIENT_BALANCE` → `src/billing.ts` (баланс vs лимит ключа — только по тексту) → код `QUOTA` и понятный
-  текст; клиент — `shell.quota-notice` (select только при свежем alert Пользы), чип жёлтый при балансе < порога.
+- Ошибки чата: `src/gateway-errors.ts` сохраняет сообщение ответа шлюза и передаёт его в историю чата. Коды `AUTH`
+  и `QUOTA`, которые Harness заменяет своим переводом, получают префикс `POLZA_`. Ошибки оплаты получают код
+  `POLZA_PAYMENT_REQUIRED` и также показываются в чипе баланса.
 - Медиа: `POST /v1/media` async + опрос; инструменты `src/tools.ts`, файлы в `<cwd>/polza-media`, картинки — ещё и вложением;
   карточка в чате — `tool.call.toolview` по имени инструмента. Видео seedance-2-mini 4 с 480p ≈ 10 ₽, ~90 с.
 - Голос: `ctx.speechToText.register` (экспериментальный бандл voice-input), вход — WAV 16 кГц моно → `/v1/audio/transcriptions` `ai-sage/gigaam-v3`.
