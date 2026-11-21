@@ -59,5 +59,17 @@ node -e '
   const first = a.findIndex((n, i) => n !== b[i])
   if (first < 0 || b[first] < a[first]) process.exit(1)
 ' "$latest" "$version"
+if [[ "$GITHUB_REF_TYPE" != tag ]] && gh release view "v$version" >/dev/null 2>&1; then
+  echo "::error::GitHub Release v$version exists but npm latest is $latest. Check npm Staged Packages before retrying."
+  exit 1
+fi
 npm publish --ignore-scripts --provenance --access public
-ensure_release "$version" "$(git rev-parse HEAD)"
+for attempt in {1..6}; do
+  if curl -fsS "https://registry.npmjs.org/$package/latest" | jq -e --arg version "$version" '.version == $version' >/dev/null; then
+    ensure_release "$version" "$(git rev-parse HEAD)"
+    exit 0
+  fi
+  sleep 10
+done
+echo "::error::npm accepted $version but it is not visible as latest. Check npm Staged Packages."
+exit 1
