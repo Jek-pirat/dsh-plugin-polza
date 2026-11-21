@@ -2,7 +2,7 @@
 set -euo pipefail
 
 package=$(node -p 'require("./package.json").name')
-registry=$(npm view "$package@latest" version gitHead --json)
+registry=$(curl --fail --silent --show-error --retry 3 "https://registry.npmjs.org/$package/latest")
 latest=$(jq -er .version <<< "$registry")
 published_sha=$(jq -er .gitHead <<< "$registry")
 
