@@ -148,14 +148,7 @@ const catalogEntrySchema = z
     is_fz152_compliant: z.boolean().catch(false),
     stores_data_in_russia: z.boolean().catch(false),
     icon_provider_slug: z.string().nullish(),
-    reasoning: z
-      .object({
-        mandatory: z.boolean().nullish(),
-        supported_efforts: z.array(z.string()).nullish(),
-        default_effort: z.string().nullish(),
-      })
-      .passthrough()
-      .nullish(),
+    reasoning: reasoningSchema.catch(null),
     architecture: z
       .object({ input_modalities: z.array(z.string()).nullish() })
       .passthrough()
@@ -163,6 +156,8 @@ const catalogEntrySchema = z
     top_provider: z
       .object({
         pricing: pricingSchema.nullish(),
+        reasoning: reasoningSchema.catch(null),
+        capabilities: reasoningCapabilitiesSchema,
         supported_parameters: z.array(z.string()).nullish(),
         context_length: z.number().nullish(),
         max_completion_tokens: z.number().nullish(),
@@ -198,7 +193,11 @@ export function parsePolzaCatalogEntry(raw: unknown): PolzaCatalogModel | null {
   const parsed = catalogEntrySchema.safeParse(raw);
   if (!parsed.success || parsed.data.type !== "chat") return null;
   const model = parsed.data;
-  const efforts = model.reasoning?.supported_efforts?.filter(
+  const rootReasoning = model.reasoning;
+  const reasoning = rootReasoning?.supported_efforts?.length
+    ? { efforts: rootReasoning.supported_efforts, mandatory: rootReasoning.mandatory === true }
+    : reasoningFromProvider(model.top_provider?.reasoning ?? rootReasoning, model.top_provider?.capabilities);
+  const efforts = reasoning.efforts.filter(
     (effort) => effort.trim().length > 0,
   );
   const supportedParameters = model.top_provider?.supported_parameters ?? [];
@@ -211,11 +210,11 @@ export function parsePolzaCatalogEntry(raw: unknown): PolzaCatalogModel | null {
     maxCompletionTokens:
       model.max_completion_tokens ?? model.top_provider?.max_completion_tokens ?? null,
     supportsReasoning:
-      (efforts !== undefined && efforts !== null && efforts.length > 0) ||
+      efforts.length > 0 ||
       supportedParameters.includes("reasoning") ||
       supportedParameters.includes("reasoning_effort"),
-    reasoningEfforts: efforts && efforts.length > 0 ? efforts : null,
-    reasoningMandatory: model.reasoning?.mandatory === true,
+    reasoningEfforts: efforts.length > 0 ? efforts : null,
+    reasoningMandatory: reasoning.mandatory,
     pricing: toPricing(model.top_provider?.pricing),
     inputModalities: model.architecture?.input_modalities ?? ["text"],
     supportsTools: supportedParameters.includes("tools"),

@@ -7,7 +7,9 @@ import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { readFileSync } from 'node:fs'
 import { parsePolzaCatalog } from '../src/contract.ts'
+import type { PolzaModelProvider } from '../src/contract.ts'
 import { toPiModel } from '../src/models.ts'
+import { providerReasoningLevels } from '../src/provider-reasoning.ts'
 import { buildPolzaProfile, POLZA_AUTH } from '../src/route.ts'
 import { withGatewayErrors } from '../src/gateway-errors.ts'
 
@@ -59,14 +61,47 @@ beforeAll(async () => {
 })
 afterAll(() => { server.close() })
 
-function adapter(modelProviders?: (id: string) => readonly string[] | undefined) {
+function adapter(modelProviders?: (id: string) => readonly string[] | undefined, details?: readonly PolzaModelProvider[]) {
   const catalog = parsePolzaCatalog(JSON.parse(readFileSync(new URL('./fixtures/catalog.json', import.meta.url), 'utf8')))
-  const models = catalog.map(model => toPiModel(model, 'polza', baseUrl))
-  const profiles = new Map([['polza', buildPolzaProfile({ models, keyRef: credentialRef('POLZA_API_KEY'), modelProviders })]])
+  const levels = details === undefined ? undefined : providerReasoningLevels(new Map(details.map(({ name, reasoningLevels }) => [name, reasoningLevels])))
+  const models = catalog.map(model => toPiModel(model, 'polza', baseUrl, levels))
+  const profiles = new Map([['polza', buildPolzaProfile({ models, keyRef: credentialRef('POLZA_API_KEY'), modelProviders, providerDetails: () => details })]])
   return new PiAiAdapter({ profiles: () => profiles, resolveApiKey: () => Promise.resolve(testApiKey), auth: POLZA_AUTH })
 }
 
 describe('polza route on PiAiAdapter', () => {
+  it('sends explicit levels only to compatible routes and distinguishes Off from provider default', async () => {
+    let selected: string[] = []
+    const llm = adapter(() => selected, [
+      { name: 'fast', price: null, unofficial: false, reasoningLevels: ['off', 'low', 'high', 'max'] },
+      { name: 'strict', price: null, unofficial: false, reasoningLevels: ['high', 'xhigh'] },
+    ])
+    const model = 'anthropic/claude-sonnet-5.5'
+    const run = async (reasoningEffort?: string) => {
+      const chunks: StreamChunk[] = []
+      const call = await llm.prepareCall('polza', model)
+      for await (const chunk of withGatewayErrors(() => call.stream({
+        provider: 'polza', model, reasoningEffort,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Привет' }] }],
+      } as never), () => {}, reasoningEffort)) chunks.push(chunk)
+      return chunks.at(-1)
+    }
+    await run('max')
+    expect(requests.at(-1)?.body).toMatchObject({ reasoning: { effort: 'max' }, provider: { only: ['fast'] } })
+    await run('xhigh')
+    expect(requests.at(-1)?.body).toMatchObject({ reasoning: { effort: 'xhigh' }, provider: { only: ['strict'] } })
+    await run('off')
+    expect(requests.at(-1)?.body).toMatchObject({ reasoning: { effort: 'none' }, provider: { only: ['fast'] } })
+    await run()
+    expect(requests.at(-1)?.body).not.toHaveProperty('reasoning')
+    expect(requests.at(-1)?.body).not.toHaveProperty('provider')
+    selected = ['strict', 'fast']
+    await run('high')
+    expect(requests.at(-1)?.body).toMatchObject({ reasoning: { effort: 'high' }, provider: { only: selected, order: selected } })
+    const before = requests.length
+    expect(await run('max')).toMatchObject({ type: 'finish', reason: { kind: 'error' } })
+    expect(requests).toHaveLength(before)
+  })
   it('keeps each concurrent call’s gateway message and failure type', async () => {
     const model = 'anthropic/claude-sonnet-5.5'
     const call = await adapter().prepareCall('polza', model)

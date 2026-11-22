@@ -3,7 +3,10 @@ import type { ModelProviders, PolzaStore } from '../api.ts'
 
 const EMPTY: readonly string[] = []
 
-export function useModelProvider(store: PolzaStore, model: string | undefined, open: boolean) {
+export function useModelProvider(
+  store: PolzaStore, model: string | undefined, open: boolean,
+  afterSave?: (providers: readonly string[]) => Promise<void>,
+) {
   const { state } = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [list, setList] = useState<{ model: string; data: ModelProviders }>()
   const [loadError, setLoadError] = useState<string>()
@@ -46,6 +49,7 @@ export function useModelProvider(store: PolzaStore, model: string | undefined, o
       setSaveError(undefined)
       try {
         await store.saveModelProviders(model, providers)
+        await afterSave?.(providers)
       } catch {
         setSaveError(model)
       } finally {

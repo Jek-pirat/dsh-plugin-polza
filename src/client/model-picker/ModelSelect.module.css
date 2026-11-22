@@ -339,6 +339,200 @@
   min-width: 0;
 }
 
+.effortMenu {
+  width: min(232px, calc(100vw - 24px));
+  min-width: 0;
+}
+
+.effortSummary {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--dsw-radius-md);
+  background: linear-gradient(115deg, color-mix(in srgb, var(--pz-effort-accent) 14%, transparent), transparent 88%);
+}
+
+.effortModel {
+  display: block;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.effortValue {
+  color: color-mix(in srgb, var(--dsw-alias-label-primary) 72%, var(--pz-effort-accent));
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 650;
+}
+
+.effortScale {
+  --pz-slider-thumb-size: 24px;
+  position: relative;
+  margin: 2px 8px 4px;
+}
+
+.effortSlider {
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  cursor: grab;
+}
+
+.effortSlider:focus-visible {
+  outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+}
+
+.effortSlider:active {
+  cursor: grabbing;
+}
+
+.effortSlider[aria-disabled="true"] {
+  cursor: default;
+}
+
+.effortSlider::-webkit-slider-runnable-track {
+  height: var(--pz-slider-thumb-size);
+}
+
+.effortSlider::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--pz-slider-thumb-size);
+  height: var(--pz-slider-thumb-size);
+  background: transparent;
+}
+
+.effortTrack {
+  --pz-slider-track-padding: 12px;
+  position: absolute;
+  inset: 50% calc(var(--pz-slider-thumb-size) / 2) auto;
+  height: 10px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.effortRail {
+  position: absolute;
+  inset: 0 calc(-1 * var(--pz-slider-track-padding));
+  overflow: hidden;
+  border-radius: 5px;
+}
+
+.effortRailSegments,
+.effortThumbTravel {
+  position: absolute;
+  inset: 0;
+}
+
+.effortRailSegments {
+  inset-inline: var(--pz-slider-track-padding);
+}
+
+.effortRailSegments::before,
+.effortRailSegments::after {
+  position: absolute;
+  inset-block: 0;
+  width: calc(100% + 2 * var(--pz-slider-track-padding));
+  border-radius: 5px;
+  content: '';
+}
+
+.effortRailSegments::before {
+  inset-inline-end: calc(100% + var(--pz-slider-thumb-size) / 2);
+  background: var(--pz-effort-accent);
+}
+
+.effortRailSegments::after {
+  inset-inline-start: calc(var(--pz-slider-thumb-size) / 2);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.effortScale[data-glide] :is(.effortRailSegments, .effortThumbTravel) {
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.effortThumbTravel {
+  z-index: 1;
+}
+
+.effortThumb {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: var(--pz-slider-thumb-size);
+  height: var(--pz-slider-thumb-size);
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  color: light-dark(#4c7100, var(--pz-effort-accent));
+}
+
+.effortPoint {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 24px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.effortPoint[data-current] {
+  visibility: hidden;
+}
+
+.effortPoint[data-passed] {
+  visibility: hidden;
+}
+
+.effortPoint::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .effortPoint::before {
+    transition: transform 110ms ease;
+  }
+
+  .effortPoint:hover:not([aria-disabled="true"])::before {
+    transform: scale(1.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .effortScale[data-glide] :is(.effortRailSegments, .effortThumbTravel),
+  .effortPoint::before {
+    transition: none;
+  }
+}
+
+.effortUnavailable {
+  padding: 4px 12px 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
 .modelName {
   overflow: hidden;
   color: inherit;
