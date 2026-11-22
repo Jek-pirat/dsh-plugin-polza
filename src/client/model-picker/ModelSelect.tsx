@@ -523,7 +523,6 @@ export function ModelSelect(
                 href="https://polza.ai/docs/gaidy/unofficial-providers" target="_blank" rel="noopener noreferrer"
                 aria-label={providerT('providerUnofficialGuide')}>
                 <IconQuestionOutlineRegular size={14} aria-hidden="true" />
-                <span className={css.providerGroupHelpText} aria-hidden="true">{providerT('providerGuideLink')}</span>
               </a>
             </div>
             {unofficial.map(renderProviderRow)}

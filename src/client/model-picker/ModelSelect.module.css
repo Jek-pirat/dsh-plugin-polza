@@ -339,7 +339,6 @@
 }
 
 .providerGroupHelp {
-  position: relative;
   display: grid;
   place-items: center;
   flex: 0 0 20px;
@@ -349,24 +348,12 @@
   text-decoration: none;
 }
 
+.providerGroupHelp:is(:hover, :focus-visible) {
+  color: var(--dsw-alias-state-business-primary);
+}
+
 .providerGroupHelp:focus-visible {
   outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-}
-
-.providerGroupHelpText {
-  position: absolute;
-  inset-inline-start: 100%;
-  inset-block-start: 0;
-  visibility: hidden;
-  padding-inline: 4px;
-  color: var(--dsw-alias-label-primary);
-  line-height: 20px;
-  text-decoration: underline;
-  white-space: nowrap;
-}
-
-.providerGroupHelp:is(:hover, :focus-visible) .providerGroupHelpText {
-  visibility: visible;
 }
 
 .providerUnofficialGroup {
