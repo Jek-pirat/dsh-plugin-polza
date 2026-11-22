@@ -59,7 +59,7 @@ export const inject = ['llm']
 
 export interface Config {
   baseURL: string
-  apiKeyEnv: string
+  apiKeyEnv: import('@deepseek-ai/cordis').Volatile<string>
   models: import('@deepseek-ai/cordis').Volatile<string[]>
   catalogTtlHours: number
 }
@@ -67,7 +67,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   baseURL: z.string().default(POLZA_DEFAULT_BASE_URL)
     .description('Корень API Пользы; инференс идёт в {baseURL}/v1, вход — в {baseURL}/auth.'),
-  apiKeyEnv: z.string().default('POLZA_API_KEY')
+  apiKeyEnv: z.string().default('POLZA_API_KEY').volatile()
     .description('Имя учётных данных с ключом pza_… (хранилище harness, окружение или .env).'),
   models: z.array(z.string()).default([...POLZA_STARTER_MODELS]).volatile()
     .description('Белый список моделей каталога Пользы в порядке пикера.'),
@@ -138,7 +138,8 @@ class PolzaAdapter extends PiAiAdapter {
 export function apply(ctx: Context, config: Config): void {
   const baseUrl = trimSlash(config.baseURL)
   const inferenceUrl = `${baseUrl}/v1`
-  const keyRef = credentialRef(config.apiKeyEnv)
+  const keyName = () => config.apiKeyEnv.get()
+  const keyRef = () => credentialRef(keyName())
   const modelsUpdated = () => { ctx.emit('llm/models-updated', PROVIDER) }
 
   const catalog = new PolzaCatalogStore({
@@ -219,7 +220,7 @@ export function apply(ctx: Context, config: Config): void {
       }
     }
     const profile = buildPolzaProfile({
-      models: routeModels, keyRef, retryPath: `${name}.retryPolicy`,
+      models: routeModels, keyRef: keyRef(), retryPath: `${name}.retryPolicy`,
       modelProviders: id => prefs.current().modelProviders[id],
       providerDetails: id => catalog.currentProviders(id),
     })
@@ -230,10 +231,11 @@ export function apply(ctx: Context, config: Config): void {
   /** Ключ pza_… или undefined, если его нет. */
   const currentKey = async (): Promise<string | undefined> => {
     const credentials = services.credentials
+    const ref = keyRef()
     const value = credentials !== undefined
-      ? (await credentials.resolve(keyRef))?.value
-      : launchEnvironmentOf(ctx).get(keyRef)?.value
-    return value === undefined || value.length === 0 ? undefined : assertUsableApiKey(value, 'dsh-plugin-polza', config.apiKeyEnv)
+      ? (await credentials.resolve(ref))?.value
+      : launchEnvironmentOf(ctx).get(ref)?.value
+    return value === undefined || value.length === 0 ? undefined : assertUsableApiKey(value, 'dsh-plugin-polza', ref)
   }
 
   const adapter = new PolzaAdapter({
@@ -242,7 +244,7 @@ export function apply(ctx: Context, config: Config): void {
       const key = await currentKey()
       if (key !== undefined) return key
       throw new LlmError(
-        `Польза: нет ключа ${config.apiKeyEnv}. Войдите командой /polza login или сохраните ключ: /polza key pza_…`,
+        `Польза: нет ключа ${keyName()}. Войдите командой /polza login или сохраните ключ: /polza key pza_…`,
         'MISSING_CREDENTIAL',
       )
     },
@@ -274,7 +276,7 @@ export function apply(ctx: Context, config: Config): void {
   })
   ctx.on('loader/volatile-update', () => { memo = undefined; modelsUpdated() })
   // Ключ сохранили или удалили вне плагина (Models, файл учёток) — пикер перечитает список.
-  ctx.on('credentials/reference-updated', (ref) => { if (ref === keyRef) modelsUpdated() })
+  ctx.on('credentials/reference-updated', (ref) => { if (ref === keyRef()) modelsUpdated() })
 
   const modelsReady = models.load()
   ctx.effect(() => {
@@ -312,7 +314,7 @@ export function apply(ctx: Context, config: Config): void {
   })
   const saveKey = async (key: string) => {
     const firstConnection = await currentKey().catch(() => undefined) === undefined
-    await credentialsOrThrow().set(keyRef, key)
+    await credentialsOrThrow().set(keyRef(), key)
     modelsUpdated()
     const defaults = defaultModel
     if (!firstConnection || defaults === undefined) return
@@ -333,11 +335,15 @@ export function apply(ctx: Context, config: Config): void {
       ctx.logger.warn(`${LOG} не удалось выбрать модель Пользы по умолчанию`)
     }
   }
+  const removeKey = async () => {
+    await credentialsOrThrow().unset(keyRef())
+    modelsUpdated()
+  }
   const api = new PolzaApi({
     baseUrl,
     currentKey,
     saveKey,
-    removeKey: async () => { await credentialsOrThrow().unset(keyRef); modelsUpdated() },
+    removeKey,
     catalog,
     whitelist: models,
     icons: new PolzaIconStore(join(dshHome(), 'polza', 'icons')),
@@ -390,14 +396,12 @@ export function apply(ctx: Context, config: Config): void {
   ctx.inject(['commands'], (child) => {
     registerPolzaCommand(child, {
       baseUrl,
-      keyRef,
-      keyName: config.apiKeyEnv,
-      credentials: () => services.credentials,
+      keyName,
       currentKey,
       saveKey,
+      removeKey,
       whitelist: () => models.current(),
       catalog,
-      onKeyChanged: modelsUpdated,
     })
   })
 }
