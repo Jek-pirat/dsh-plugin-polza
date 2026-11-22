@@ -64,7 +64,8 @@ if [[ "$GITHUB_REF_TYPE" != tag ]] && gh release view "v$version" >/dev/null 2>&
   exit 1
 fi
 npm publish --ignore-scripts --provenance --access public
-for attempt in {1..6}; do
+# npm may take several minutes to expose an accepted version (0.3.4 took ~2.5 min).
+for attempt in {1..60}; do
   if curl -fsS "https://registry.npmjs.org/$package/latest" | jq -e --arg version "$version" '.version == $version' >/dev/null; then
     ensure_release "$version" "$(git rev-parse HEAD)"
     exit 0
