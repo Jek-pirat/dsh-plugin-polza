@@ -259,13 +259,20 @@ function PrefsCard({ t, store, state }: { t: T; store: PolzaStore; state: PolzaS
 }
 
 function UpdatesCard({ t, store, state }: { t: T; store: PolzaStore; state: PolzaState }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const save = async (autoUpdate: boolean) => {
-    setBusy(true)
-    setError(false)
-    try { await store.savePrefs({ autoUpdate }) } catch { setError(true) } finally { setBusy(false) }
+    setSaving(true)
+    setError(null)
+    try { await store.savePrefs({ autoUpdate }) } catch { setError(t('autoUpdateSaveError')) } finally { setSaving(false) }
   }
+  const check = async () => {
+    setChecking(true)
+    setError(null)
+    try { await store.checkUpdates() } catch { setError(t('update_error')) } finally { setChecking(false) }
+  }
+  const status = checking ? 'checking' : state.updateStatus
   return (
     <div className="pz-card">
       <label className="pz-row">
@@ -275,11 +282,14 @@ function UpdatesCard({ t, store, state }: { t: T; store: PolzaStore; state: Polz
           <span className="pz-muted">{t('autoUpdateHint')}</span>
         </span>
         <input type="checkbox" className="pz-check" aria-label={t('autoUpdate')} checked={state.prefs.autoUpdate}
-          disabled={busy} onChange={event => { void save(event.target.checked) }} />
+          disabled={saving} onChange={event => { void save(event.target.checked) }} />
       </label>
-      {error ? <div className="pz-error" role="alert">{t('autoUpdateSaveError')}</div> : null}
-      {state.updateStatus === 'restart-required' || (state.prefs.autoUpdate && state.updateStatus !== 'idle')
-        ? <div className="pz-muted" role="status">{t(`update_${state.updateStatus}`)}</div> : null}
+      <div className="pz-row" style={{ flexWrap: 'wrap' }}>
+        <Button variant="outline" disabled={status === 'checking'} onClick={() => { void check() }}>{t('checkUpdates')}</Button>
+        {status === 'idle' ? null
+          : <span className="pz-muted" role="status">{t(`update_${status}`, { version: state.updateVersion ?? '' })}</span>}
+      </div>
+      {error ? <div className="pz-error" role="alert">{error}</div> : null}
     </div>
   )
 }

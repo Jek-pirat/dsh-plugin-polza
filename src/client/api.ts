@@ -122,6 +122,11 @@ export class PolzaStore {
     await this.refresh()
   }
 
+  async checkUpdates(): Promise<void> {
+    await call('updates/check', { method: 'POST', body: {} })
+    await this.refresh()
+  }
+
   modelProviders(model: string): Promise<ModelProviders> {
     return call<ModelProviders>(`model-providers?model=${encodeURIComponent(model)}`)
   }

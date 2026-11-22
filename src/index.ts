@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import { assertUsableApiKey, LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmModelInfo, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -45,7 +46,7 @@ import { PolzaIconStore } from './icons.ts'
 import { SpendLedger } from './spend.ts'
 import { PrefsStore } from './prefs.ts'
 import { updatePolza } from './startup-update.ts'
-import type { UpdateStatus } from './startup-update.ts'
+import type { UpdateResult } from './startup-update.ts'
 import { registerMediaTools } from './tools.ts'
 import { transcribe } from './media.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -168,16 +169,29 @@ export function apply(ctx: Context, config: Config): void {
 
   const prefs = new PrefsStore(join(dshHome(), 'polza', 'settings.json'))
   const prefsReady = prefs.load()
-  let updateStatus: UpdateStatus = 'unsupported'
+  let update: UpdateResult = { status: 'unsupported' }
+  let checkUpdates: (() => Promise<void>) | undefined
   ctx.inject(['pluginManager', 'connection'], (scope) => {
     scope.effect(() => {
       const controller = new AbortController()
-      const enabled = () => prefs.current().autoUpdate
-      void prefsReady.then(async () => {
-        updateStatus = enabled() ? 'checking' : 'idle'
-        updateStatus = await updatePolza(scope.pluginManager, enabled, controller.signal)
-      }).catch(() => { updateStatus = controller.signal.aborted ? 'idle' : 'error' })
-      return () => { controller.abort() }
+      let pending: Promise<void> | undefined
+      const run = (install: boolean) => {
+        if (pending !== undefined) return pending
+        if (update.status === 'restart-required') return Promise.resolve()
+        const enabled = () => !install || prefs.current().autoUpdate
+        update = { status: enabled() ? 'checking' : 'idle' }
+        pending = updatePolza(scope.pluginManager, install, enabled, controller.signal)
+          .then(result => { if (!controller.signal.aborted) update = result })
+          .catch(() => { if (!controller.signal.aborted) update = { status: 'error' } })
+          .finally(() => { pending = undefined })
+        return pending
+      }
+      checkUpdates = () => run(false)
+      void prefsReady.then(() => { if (!controller.signal.aborted) return run(true) })
+      return () => {
+        controller.abort()
+        checkUpdates = undefined
+      }
     }, 'polza: startup update')
   })
 
@@ -251,6 +265,13 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   ctx.llm.registerAdapter([PROVIDER], adapter)
+  // Desktop onboarding and Models resolve configured provider keys from this directory.
+  ctx.llm.registerConfigurableProviders([{
+    provider: PROVIDER, displayName: 'Polza', settingsNs: ctx.fiber.entry?.options.id ?? name, settingsPath: [],
+  }])
+  ctx.inject(['settings'], (scope) => {
+    scope.effect(() => scope.settings.configure({ auto: false }, ctx.fiber))
+  })
   ctx.on('loader/volatile-update', () => { memo = undefined; modelsUpdated() })
   // Ключ сохранили или удалили вне плагина (Models, файл учёток) — пикер перечитает список.
   ctx.on('credentials/reference-updated', (ref) => { if (ref === keyRef) modelsUpdated() })
@@ -322,7 +343,8 @@ export function apply(ctx: Context, config: Config): void {
     icons: new PolzaIconStore(join(dshHome(), 'polza', 'icons')),
     spend,
     prefs,
-    updateStatus: () => updateStatus,
+    update: () => update,
+    checkUpdates: () => checkUpdates?.() ?? Promise.resolve(),
     log: (message) => { ctx.logger.warn(`${LOG} ${message}`) },
   })
   ctx.inject(['connection'], (scope) => {

@@ -13,7 +13,7 @@ import { cacheHitRate } from './spend.ts'
 import type { PolzaPrefs, PrefsStore } from './prefs.ts'
 import type { SessionSpend, SpendLedger } from './spend.ts'
 import type { BillingAlert } from './billing.ts'
-import type { UpdateStatus } from './startup-update.ts'
+import type { UpdateResult, UpdateStatus } from './startup-update.ts'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 
 export const API_PREFIX = '/api/polza'
@@ -30,7 +30,8 @@ export interface PolzaApiDeps {
   icons: PolzaIconStore
   spend: SpendLedger
   prefs: PrefsStore
-  updateStatus: () => UpdateStatus
+  update: () => UpdateResult
+  checkUpdates: () => Promise<void>
   log: (message: string) => void
 }
 
@@ -82,6 +83,7 @@ export interface PolzaState {
   alert: BillingAlert | null
   prefs: PolzaPrefs
   updateStatus: UpdateStatus
+  updateVersion: string | null
 }
 
 function keyHint(key: string): string {
@@ -122,6 +124,7 @@ export class PolzaApi {
       account = this.account.value
     }
     const { cancel: _cancel, ...login } = this.login
+    const update = this.deps.update()
     return {
       signedIn: key !== undefined,
       keyHint: key === undefined ? null : keyHint(key),
@@ -130,7 +133,8 @@ export class PolzaApi {
       models: [...this.deps.whitelist.current()],
       customized: this.deps.whitelist.customized(),
       prefs: this.deps.prefs.current(),
-      updateStatus: this.deps.updateStatus(),
+      updateStatus: update.status,
+      updateVersion: 'version' in update ? update.version : null,
       alert: this.alert !== null && Date.now() - this.alert.at < 30 * 60_000 ? this.alert : null,
     }
   }
@@ -211,6 +215,10 @@ export class PolzaApi {
         return json({ ok: true })
       }) },
       { path: `${API_PREFIX}/prefs`, methods: ['POST'], fetch: guard(async request => json({ prefs: await this.deps.prefs.update(await body(request) as Partial<PolzaPrefs>) })) },
+      { path: `${API_PREFIX}/updates/check`, methods: ['POST'], fetch: guard(async () => {
+        await this.deps.checkUpdates()
+        return json(this.deps.update())
+      }) },
       { path: `${API_PREFIX}/model-providers`, methods: ['GET', 'POST'], fetch: guard(async request => {
         const model = polzaModelSlugSchema.parse(new URL(request.url).searchParams.get('model'))
         if (request.method === 'GET') {
