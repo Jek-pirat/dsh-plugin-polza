@@ -88,6 +88,7 @@ export function ModelSelect(
   const searchRef = useRef<HTMLInputElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const groupsRef = useRef<HTMLDivElement | null>(null)
+  const providerFocus = useRef<string | undefined>(undefined)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const id = useId()
   // CSS anchor positioning (as in harness 0.2.2-rc.4): the trigger names the anchor, the portaled card follows it.
@@ -132,10 +133,11 @@ export function ModelSelect(
   const polzaModel = currentChoice?.selection.provider === 'polza' ? currentChoice.selection.model : undefined
   const upstream = useModelProvider(store, polzaModel, open && pane === 'provider')
   const providerSummary = upstream.selected.join(', ') || providerT('providerAuto')
-  const providerRows = pane === 'provider'
-    ? [...upstream.selected, ...upstream.providers.filter(provider => !upstream.selected.includes(provider))]
-    : []
+  const availableProviders = upstream.providers.filter(provider => !upstream.selected.includes(provider))
   const providerLocked = locked || state.pending !== null || !upstream.ready
+  const providerPrices = new Map(Object.entries(upstream.prices ?? {}))
+  const unofficialProviders = new Set(upstream.unofficial)
+  const showProviderListTitles = unofficialProviders.size > 0 && upstream.selected.length > 0 && availableProviders.length > 0
   const reasoning = currentChoice?.model.reasoning
   const effectiveEffort = state.current?.reasoningEffort ?? reasoning?.defaultEffort
   const effortLabel = currentChoice === undefined
@@ -231,6 +233,16 @@ export function ModelSelect(
     const target = active ?? itemRefs.current.find(item => item !== null && !item.disabled)
     target?.focus()
   }, [open, pane, upstream.ready])
+
+  useLayoutEffect(() => {
+    const provider = providerFocus.current
+    if (provider === undefined || upstream.saving) return
+    providerFocus.current = undefined
+    if (!open || pane !== 'provider') return
+    const row = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[data-upstream-provider]') ?? [])]
+      .find(button => button.dataset.upstreamProvider === provider)
+    row?.focus()
+  }, [open, pane, upstream.saving, upstream.selected])
 
   if (!available) return null
 
@@ -440,6 +452,76 @@ export function ModelSelect(
     return (node: HTMLButtonElement | null) => { itemRefs.current[at] = node }
   }
 
+  const renderProviderRow = (provider: string) => {
+    // Section order is visual. The rank and move controls refer to the routing list.
+    const index = upstream.selected.indexOf(provider)
+    const selected = index >= 0
+    const price = providerPrices.get(provider)
+    const rates = price === undefined ? undefined : `${formatProviderRate(price.promptPerMillion)} / ${formatProviderRate(price.completionPerMillion)}`
+    const label = [provider]
+    if (unofficialProviders.has(provider)) label.push(providerT('providerUnofficial'))
+    if (rates !== undefined) label.push(`${providerT('providerPriceUnit')}: ${rates}`)
+    const accessibleLabel = label.join(', ')
+    return (
+      <div key={provider} role="none" className={css.providerRow} data-ranked={selected ? '' : undefined}>
+        <button ref={itemRef()} type="button" role="menuitemcheckbox" aria-checked={selected}
+          className={clsx(css.option, selected && css.selected)}
+          disabled={providerLocked} aria-disabled={upstream.saving || undefined}
+          data-upstream-provider={provider}
+          title={accessibleLabel} aria-label={accessibleLabel}
+          aria-description={selected ? providerT('providerPriority', { rank: index + 1 }) : undefined}
+          onClick={event => {
+            if (event.currentTarget === document.activeElement) providerFocus.current = provider
+            const next = selected ? upstream.selected.filter(name => name !== provider) : [...upstream.selected, provider]
+            void upstream.save(next)
+          }}>
+          {selected && <span aria-hidden="true" className={css.providerRank}>{index + 1}</span>}
+          <span className={css.optionCopy}><span className={css.modelName}>{provider}</span></span>
+          {rates !== undefined && <span className={css.providerPrice} aria-hidden="true">{rates}</span>}
+          <span className={css.check}>{selected && <IconCheckOutlineRegular />}</span>
+        </button>
+        {selected && upstream.selected.length > 1 && [-1, 1].map(offset => {
+          const target = index + offset
+          const blocked = upstream.saving || target < 0 || target >= upstream.selected.length
+          const label = providerT(offset < 0 ? 'providerUp' : 'providerDown', { provider })
+          return (
+            <button ref={itemRef()} key={offset} type="button" role="menuitem"
+              className={css.providerMove} aria-label={label} title={label}
+              disabled={providerLocked} aria-disabled={blocked}
+              onClick={() => {
+                if (blocked) return
+                const next = [...upstream.selected]
+                next.splice(index, 1)
+                next.splice(target, 0, provider)
+                void upstream.save(next)
+              }}>
+              {offset < 0 ? <IconChevronUpOutlineRegular size={14} /> : <IconChevronDownOutlineRegular size={14} />}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const renderProviderList = (providers: readonly string[], label: string) => {
+    if (providers.length === 0) return null
+    const official = providers.filter(provider => !unofficialProviders.has(provider))
+    const unofficial = providers.filter(provider => unofficialProviders.has(provider))
+    const unofficialLabel = providerT('providerUnofficialGroup')
+    return (
+      <div className={css.providerList} role="group" aria-label={label}>
+        {showProviderListTitles && <div className={css.providerListTitle} aria-hidden="true">{label}</div>}
+        {official.map(renderProviderRow)}
+        {unofficial.length > 0 && (
+          <div className={css.providerUnofficialGroup} role="group" aria-label={unofficialLabel}>
+            <div className={css.providerGroupTitle} aria-hidden="true">{unofficialLabel}</div>
+            {unofficial.map(renderProviderRow)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div
       ref={rootRef}
@@ -495,6 +577,7 @@ export function ModelSelect(
           role={pane === 'model' ? 'group' : 'menu'}
           aria-label={pane === 'provider' ? providerT('provider') : t('menu.aria')}
           aria-busy={state.status === 'loading' || busy || (pane === 'provider' && upstream.saving)}
+          data-priced-provider-menu={pane === 'provider' && providerPrices.size > 0 ? '' : undefined}
         >
           {pane === 'root' && (
             <>
@@ -633,47 +716,10 @@ export function ModelSelect(
                 {upstream.error === 'load' && <button type="button" className={css.retry} onClick={upstream.reload}>{t('retry')}</button>}
               </div>}
               {upstream.status === 'loading' && <div className={css.status} role="status">{providerT('providerLoading')}</div>}
-              <div className={clsx(css.groups, 'scrollable')}>
-                {providerRows.map((provider, index) => {
-                  const selected = index < upstream.selected.length
-                  return (
-                    <div key={provider} role="none" className={css.providerRow}>
-                      <button ref={itemRef()} type="button" role="menuitemcheckbox" aria-checked={selected}
-                        className={clsx(css.option, selected && css.selected)}
-                        disabled={providerLocked} aria-disabled={upstream.saving || undefined}
-                        title={provider}
-                        onClick={() => {
-                          const next = selected
-                            ? upstream.selected.filter(name => name !== provider)
-                            : [...upstream.selected, provider]
-                          void upstream.save(next)
-                        }}>
-                        {selected && <span aria-hidden="true" className={css.providerRank}>{index + 1}</span>}
-                        <span className={css.optionCopy}><span className={css.modelName}>{provider}</span></span>
-                        <span className={css.check}>{selected && <IconCheckOutlineRegular />}</span>
-                      </button>
-                      {selected && upstream.selected.length > 1 && [-1, 1].map(offset => {
-                        const target = index + offset
-                        const blocked = upstream.saving || target < 0 || target >= upstream.selected.length
-                        const label = providerT(offset < 0 ? 'providerUp' : 'providerDown', { provider })
-                        return (
-                          <button ref={itemRef()} key={offset} type="button" role="menuitem"
-                            className={css.providerMove} aria-label={label} title={label}
-                            disabled={providerLocked} aria-disabled={blocked}
-                            onClick={() => {
-                              if (blocked) return
-                              const next = [...upstream.selected]
-                              next.splice(index, 1)
-                              next.splice(target, 0, provider)
-                              void upstream.save(next)
-                            }}>
-                            {offset < 0 ? <IconChevronUpOutlineRegular size={14} /> : <IconChevronDownOutlineRegular size={14} />}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )
-                })}
+              {providerPrices.size > 0 && <div className={css.providerPriceHeading}>{providerT('providerPriceUnit')}</div>}
+              <div className={clsx(css.groups, 'scrollable')} data-reorder={upstream.selected.length > 1 ? '' : undefined}>
+                {renderProviderList(upstream.selected, providerT('providerSelected'))}
+                {renderProviderList(availableProviders, providerT('providerAvailable'))}
                 <button ref={itemRef()} type="button" role="menuitemradio"
                   aria-checked={upstream.selected.length === 0} className={css.option}
                   disabled={providerLocked} aria-disabled={upstream.saving || undefined}
@@ -735,4 +781,12 @@ export function ModelSelect(
       )}
     </div>
   )
+}
+
+const providerRateFormat = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' })
+
+function formatProviderRate(rate: number | null): string {
+  if (rate === null) return '—'
+  if (rate > 0 && rate < 0.01) return `<${providerRateFormat.format(0.01)}`
+  return providerRateFormat.format(rate)
 }
