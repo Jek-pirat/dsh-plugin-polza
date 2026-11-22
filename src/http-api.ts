@@ -2,7 +2,6 @@
 // (доверие Host/Origin и cookie-авторизацию владельца проверяет harness до нас).
 import { fetchPolzaAccount } from './account.ts'
 import type { PolzaAccount } from './account.ts'
-import { fetchModelProviders } from './catalog.ts'
 import type { PolzaCatalogStore } from './catalog.ts'
 import { polzaModelSlugSchema } from './contract.ts'
 import type { PolzaCatalogModel } from './contract.ts'
@@ -210,7 +209,15 @@ export class PolzaApi {
       { path: `${API_PREFIX}/prefs`, methods: ['POST'], fetch: guard(async request => json({ prefs: await this.deps.prefs.update(await body(request) as Partial<PolzaPrefs>) })) },
       { path: `${API_PREFIX}/model-providers`, methods: ['GET', 'POST'], fetch: guard(async request => {
         const model = polzaModelSlugSchema.parse(new URL(request.url).searchParams.get('model'))
-        if (request.method === 'GET') return json({ providers: await fetchModelProviders(this.deps.baseUrl, model) })
+        if (request.method === 'GET') {
+          const entries = await this.deps.catalog.loadProviders(model)
+          return json({
+            providers: entries.map(({ name }) => name),
+            prices: Object.fromEntries(entries.flatMap(({ name, price }) => price === null ? [] : [[name, price]])),
+            unofficial: entries.filter(entry => entry.unofficial).map(({ name }) => name),
+            reasoning: Object.fromEntries(entries.map(({ name, reasoningLevels }) => [name, reasoningLevels])),
+          })
+        }
         const providers = (await body(request))['providers']
         if (!Array.isArray(providers) || !providers.every((name: unknown): name is string =>
           typeof name === 'string' && name.trim() !== '') || new Set(providers).size !== providers.length) {
@@ -219,8 +226,8 @@ export class PolzaApi {
         const previous = this.deps.prefs.current().modelProviders[model] ?? []
         const added = providers.filter(name => !previous.includes(name))
         if (added.length > 0) {
-          const available = await fetchModelProviders(this.deps.baseUrl, model)
-          if (added.some(name => !available.includes(name))) return json({ error: 'Провайдер недоступен для этой модели' }, 400)
+          const available = new Set((await this.deps.catalog.loadProviders(model)).map(({ name }) => name))
+          if (added.some(name => !available.has(name))) return json({ error: 'Провайдер недоступен для этой модели' }, 400)
         }
         const prefs = await this.deps.prefs.setModelProviders(model, providers)
         return json({ prefs })
