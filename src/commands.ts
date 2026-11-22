@@ -14,6 +14,7 @@ export interface PolzaCommandDeps {
   keyName: string
   credentials: () => Context['credentials'] | undefined
   currentKey: () => Promise<string | undefined>
+  saveKey: (key: string) => Promise<void>
   whitelist: () => readonly string[]
   catalog: PolzaCatalogStore
   onKeyChanged: () => void
@@ -44,18 +45,13 @@ export function registerPolzaCommand(ctx: Context, deps: PolzaCommandDeps): void
     return service
   }
 
-  const saveKey = async (key: string): Promise<void> => {
-    await credentials().set(deps.keyRef, key)
-    deps.onKeyChanged()
-  }
-
   const handlers: Record<string, (rest: string, signal: AbortSignal) => Promise<CommandResult>> = {
     async login(_rest, signal) {
       const login = await startLoopbackLogin({ baseUrl: deps.baseUrl, appName: 'DeepSeek Harness', signal })
       openInBrowser(login.url)
       ctx.logger.info(`[dsh-plugin-polza] вход: ${login.url}`)
       try {
-        await saveKey(await login.key)
+        await deps.saveKey(await login.key)
       } finally {
         login.close()
       }
@@ -66,7 +62,7 @@ export function registerPolzaCommand(ctx: Context, deps: PolzaCommandDeps): void
     async key(rest) {
       const key = rest.trim()
       if (!/^pza_[A-Za-z0-9_-]{8,}$/u.test(key)) return fail('Ожидался ключ вида pza_… (polza.ai → Ключи API)')
-      await saveKey(key)
+      await deps.saveKey(key)
       return ok(`Ключ сохранён в ${deps.keyName}.`)
     },
 

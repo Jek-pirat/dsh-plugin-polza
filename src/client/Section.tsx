@@ -166,7 +166,6 @@ function ModelsEditor({ t, store, state }: { t: T; store: PolzaStore; state: Pol
                   <div className="pz-grow">
                     <div className="pz-row">
                       <span className="pz-title">{row?.name ?? id}</span>
-                      {index === 0 ? <Tag tone="neutral">{t('default')}</Tag> : null}
                       {row?.fz152 ? <Tag tone="success">{t('fz152')}</Tag> : row?.russia ? <Tag tone="info">{t('russia')}</Tag> : null}
                     </div>
                     <div className="pz-dim">{id}{row ? ` · ${price(row)}` : catalog.length > 0 ? ` · ${t('missing')}` : ''}</div>
@@ -259,6 +258,32 @@ function PrefsCard({ t, store, state }: { t: T; store: PolzaStore; state: PolzaS
   )
 }
 
+function UpdatesCard({ t, store, state }: { t: T; store: PolzaStore; state: PolzaState }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(false)
+  const save = async (autoUpdate: boolean) => {
+    setBusy(true)
+    setError(false)
+    try { await store.savePrefs({ autoUpdate }) } catch { setError(true) } finally { setBusy(false) }
+  }
+  return (
+    <div className="pz-card">
+      <label className="pz-row">
+        <span className="pz-grow">
+          <span className="pz-title">{t('autoUpdate')}</span>
+          <br />
+          <span className="pz-muted">{t('autoUpdateHint')}</span>
+        </span>
+        <input type="checkbox" className="pz-check" aria-label={t('autoUpdate')} checked={state.prefs.autoUpdate}
+          disabled={busy} onChange={event => { void save(event.target.checked) }} />
+      </label>
+      {error ? <div className="pz-error" role="alert">{t('autoUpdateSaveError')}</div> : null}
+      {state.updateStatus === 'restart-required' || (state.prefs.autoUpdate && state.updateStatus !== 'idle')
+        ? <div className="pz-muted" role="status">{t(`update_${state.updateStatus}`)}</div> : null}
+    </div>
+  )
+}
+
 export function PolzaSection({ t, store }: { t: T; store: PolzaStore }) {
   const { state, loading, error } = useStore(store)
   return (
@@ -272,6 +297,7 @@ export function PolzaSection({ t, store }: { t: T; store: PolzaStore }) {
       </div>
       {error ? <div className="pz-error">{error}</div> : null}
       {loading && state === null ? null : state?.signedIn ? <AccountCard t={t} store={store} state={state} /> : <SignedOut t={t} store={store} state={state} />}
+      {state ? <UpdatesCard t={t} store={store} state={state} /> : null}
       {state ? <ModelsEditor t={t} store={store} state={state} /> : null}
       {state ? <PrefsCard t={t} store={store} state={state} /> : null}
       <div className="pz-dim">{t('footer')}</div>

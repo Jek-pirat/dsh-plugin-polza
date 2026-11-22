@@ -13,6 +13,7 @@ import { cacheHitRate } from './spend.ts'
 import type { PolzaPrefs, PrefsStore } from './prefs.ts'
 import type { SessionSpend, SpendLedger } from './spend.ts'
 import type { BillingAlert } from './billing.ts'
+import type { UpdateStatus } from './startup-update.ts'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 
 export const API_PREFIX = '/api/polza'
@@ -29,6 +30,7 @@ export interface PolzaApiDeps {
   icons: PolzaIconStore
   spend: SpendLedger
   prefs: PrefsStore
+  updateStatus: () => UpdateStatus
   log: (message: string) => void
 }
 
@@ -79,6 +81,7 @@ export interface PolzaState {
   /** Последняя ошибка денег за 30 минут. */
   alert: BillingAlert | null
   prefs: PolzaPrefs
+  updateStatus: UpdateStatus
 }
 
 function keyHint(key: string): string {
@@ -127,6 +130,7 @@ export class PolzaApi {
       models: [...this.deps.whitelist.current()],
       customized: this.deps.whitelist.customized(),
       prefs: this.deps.prefs.current(),
+      updateStatus: this.deps.updateStatus(),
       alert: this.alert !== null && Date.now() - this.alert.at < 30 * 60_000 ? this.alert : null,
     }
   }
