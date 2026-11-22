@@ -36,7 +36,7 @@ import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconChevronUpOutlineRegular, IconCloseFillRegular,
-  IconDataOutlineRegular, IconWarningOutlineRegular, Input, isMobileDevice, rankByName, StateDot, Tag, Toast,
+  IconDataOutlineRegular, IconQuestionOutlineRegular, IconWarningOutlineRegular, Input, isMobileDevice, rankByName, StateDot, Tag, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelLabelOwner, ModelSelectInjected } from '@deepseek-ai/dsh-client-ui-model-selection/client'
@@ -287,7 +287,10 @@ export function ModelSelect(
   }
 
   const moveFocus = (offset: number): void => {
-    const items = itemRefs.current.filter(item => item !== null && !item.disabled && item.getAttribute('aria-disabled') !== 'true')
+    const candidates = pane === 'provider'
+      ? [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]') ?? [])]
+      : itemRefs.current
+    const items = candidates.filter(item => item !== null && !item.hasAttribute('disabled') && item.getAttribute('aria-disabled') !== 'true')
     if (items.length === 0) return
     const active = items.findIndex(item => item === document.activeElement)
     // Focus outside the rows (the trigger, which keeps it while the menu
@@ -514,7 +517,15 @@ export function ModelSelect(
         {official.map(renderProviderRow)}
         {unofficial.length > 0 && (
           <div className={css.providerUnofficialGroup} role="group" aria-label={unofficialLabel}>
-            <div className={css.providerGroupTitle} aria-hidden="true">{unofficialLabel}</div>
+            <div className={css.providerGroupTitle}>
+              <span aria-hidden="true">{unofficialLabel}</span>
+              <a className={css.providerGroupHelp} role="menuitem"
+                href="https://polza.ai/docs/gaidy/unofficial-providers" target="_blank" rel="noopener noreferrer"
+                aria-label={providerT('providerUnofficialGuide')}>
+                <IconQuestionOutlineRegular size={14} aria-hidden="true" />
+                <span className={css.providerGroupHelpText} aria-hidden="true">{providerT('providerGuideLink')}</span>
+              </a>
+            </div>
             {unofficial.map(renderProviderRow)}
           </div>
         )}
