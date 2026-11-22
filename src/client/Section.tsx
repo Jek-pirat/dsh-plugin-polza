@@ -307,9 +307,9 @@ export function PolzaSection({ t, store }: { t: T; store: PolzaStore }) {
       </div>
       {error ? <div className="pz-error">{error}</div> : null}
       {loading && state === null ? null : state?.signedIn ? <AccountCard t={t} store={store} state={state} /> : <SignedOut t={t} store={store} state={state} />}
-      {state ? <UpdatesCard t={t} store={store} state={state} /> : null}
       {state ? <ModelsEditor t={t} store={store} state={state} /> : null}
       {state ? <PrefsCard t={t} store={store} state={state} /> : null}
+      {state ? <UpdatesCard t={t} store={store} state={state} /> : null}
       <div className="pz-dim">{t('footer')}</div>
     </div>
   )
