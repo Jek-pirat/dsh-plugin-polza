@@ -24,6 +24,7 @@ import { assertUsableApiKey, LlmError, resolveImageAttachmentAccess } from '@dee
 import type { GenerateOptions, LlmModelInfo, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { BillingAlert } from './billing.ts'
 import { withGatewayErrors } from './gateway-errors.ts'
+import { providerReasoningLevels } from './provider-reasoning.ts'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-fs'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -82,7 +83,11 @@ class PolzaAdapter extends PiAiAdapter {
   constructor(
     options: ConstructorParameters<typeof PiAiAdapter>[0],
     private readonly catalogEntry: (id: string) => PolzaCatalogModel | undefined,
-    private readonly hooks: { billing: (alert: BillingAlert) => void; usage: (options: GenerateOptions, chunk: StreamChunk) => void },
+    private readonly hooks: {
+      loadProviders: (model: string) => Promise<unknown>
+      billing: (alert: BillingAlert) => void
+      usage: (options: GenerateOptions, chunk: StreamChunk) => void
+    },
   ) {
     super(options)
   }
@@ -90,18 +95,22 @@ class PolzaAdapter extends PiAiAdapter {
   private wrap(options: GenerateOptions, inner: () => AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk> {
     const hooks = this.hooks
     return (async function* () {
-      for await (const chunk of withGatewayErrors(inner, hooks.billing)) {
+      for await (const chunk of withGatewayErrors(inner, hooks.billing, options.reasoningEffort)) {
         if (chunk.type === 'usage') hooks.usage(options, chunk)
         yield chunk
       }
     })()
   }
 
-  override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return this.wrap(options, () => super.stream(options))
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    await this.hooks.loadProviders(options.model)
+    options.signal?.throwIfAborted()
+    yield* this.wrap(options, () => super.stream(options))
   }
 
   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    await this.hooks.loadProviders(model)
+    signal?.throwIfAborted()
     const prepared = await super.prepareCall(provider, model, signal)
     return { model: prepared.model, stream: options => this.wrap(options, () => prepared.stream(options)) }
   }
@@ -133,6 +142,7 @@ export function apply(ctx: Context, config: Config): void {
     cachePath: join(dshHome(), 'polza', 'catalog.json'),
     ttlMs: config.catalogTtlHours * 3_600_000,
     onChange: () => { memo = undefined; modelsUpdated() },
+    onProvidersChange: () => { memo = undefined; modelsUpdated() },
     onError: (error) => { ctx.logger.warn(`${LOG} каталог: %s`, error instanceof Error ? error.message : String(error)) },
   })
 
@@ -166,7 +176,13 @@ export function apply(ctx: Context, config: Config): void {
     const routeModels: Model<Api>[] = []
     for (const id of new Set(whitelist)) {
       const entry = catalog.get(id)
-      if (entry !== undefined) routeModels.push(toPiModel(entry, PROVIDER, inferenceUrl))
+      if (entry !== undefined) {
+        const providers = catalog.currentProviders(id)
+        const levels = providers?.length
+          ? providerReasoningLevels(new Map(providers.map(({ name, reasoningLevels }) => [name, reasoningLevels])))
+          : undefined
+        routeModels.push(toPiModel(entry, PROVIDER, inferenceUrl, levels))
+      }
       else if (!loaded) routeModels.push(fallbackModel(id, PROVIDER, inferenceUrl))
       else if (!reportedMissing.has(id)) {
         reportedMissing.add(id)
@@ -176,6 +192,7 @@ export function apply(ctx: Context, config: Config): void {
     const profile = buildPolzaProfile({
       models: routeModels, keyRef, retryPath: `${name}.retryPolicy`,
       modelProviders: id => prefs.current().modelProviders[id],
+      providerDetails: id => catalog.currentProviders(id),
     })
     memo = { whitelist, profiles: new Map([[PROVIDER, profile]]) }
     return memo.profiles
@@ -211,6 +228,9 @@ export function apply(ctx: Context, config: Config): void {
       ctx.logger.warn(`${LOG} история ${model}: replay недоступен, отправляю нейтральный контент (${reason})`)
     },
   }, id => catalog.get(id), {
+    loadProviders: model => models.current().includes(model)
+      ? catalog.loadProviders(model).catch(() => undefined)
+      : Promise.resolve(),
     billing: (alert) => { api.reportBilling(alert) },
     usage: (options, chunk) => { api.reportUsage(options, chunk) },
   })

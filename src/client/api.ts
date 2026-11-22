@@ -2,9 +2,17 @@
 import type { CatalogRow, PolzaState } from '../http-api.ts'
 import type { SessionSpend } from '../spend.ts'
 import type { PolzaPrefs } from '../prefs.ts'
+import type { PolzaProviderPrice } from '../contract.ts'
+import type { ReasoningLevel } from '../reasoning.ts'
 
 export type { CatalogRow, PolzaState, PolzaPrefs }
 export type SpendView = SessionSpend & { cacheHitRate: number | null }
+export interface ModelProviders {
+  providers: string[]
+  prices?: Record<string, PolzaProviderPrice>
+  unofficial?: string[]
+  reasoning?: Record<string, ReasoningLevel[]>
+}
 
 function url(path: string): string {
   return new URL(`api/polza/${path}`, document.baseURI).href
@@ -112,8 +120,8 @@ export class PolzaStore {
     await this.refresh()
   }
 
-  async modelProviders(model: string): Promise<string[]> {
-    return (await call<{ providers: string[] }>(`model-providers?model=${encodeURIComponent(model)}`)).providers
+  modelProviders(model: string): Promise<ModelProviders> {
+    return call<ModelProviders>(`model-providers?model=${encodeURIComponent(model)}`)
   }
 
   async saveModelProviders(model: string, providers: readonly string[]): Promise<void> {

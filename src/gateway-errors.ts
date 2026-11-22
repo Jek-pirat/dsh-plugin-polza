@@ -13,10 +13,15 @@ interface GatewayError {
 interface RequestState {
   apiKey: string | undefined
   error: GatewayError | undefined
+  reasoningEffort: string | undefined
 }
 
 const requestState = new AsyncLocalStorage<RequestState>()
 const MAX_ERROR_BYTES = 64 * 1024
+
+export function gatewayRequest(): Pick<RequestState, 'reasoningEffort'> | undefined {
+  return requestState.getStore()
+}
 
 function nonEmpty(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
@@ -100,8 +105,9 @@ function displayFailure(failure: LlmFailure, state: RequestState, report: (alert
 export async function* withGatewayErrors(
   stream: () => AsyncIterable<StreamChunk>,
   report: (alert: BillingAlert) => void,
+  reasoningEffort?: string,
 ): AsyncIterable<StreamChunk> {
-  const state: RequestState = { apiKey: undefined, error: undefined }
+  const state: RequestState = { apiKey: undefined, error: undefined, reasoningEffort }
   let iterator: AsyncIterator<StreamChunk> | undefined
   try {
     const source = requestState.run(state, () => stream()[Symbol.asyncIterator]())

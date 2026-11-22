@@ -5,7 +5,9 @@ import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import type { Api, AuthContext, Credential, CredentialStore, Model, Provider } from '@earendil-works/pi-ai'
 import { POLZA_PROVIDER_ID } from './contract.ts'
-import { gatewayFetch } from './gateway-errors.ts'
+import { gatewayFetch, gatewayRequest } from './gateway-errors.ts'
+import type { PolzaModelProvider } from './contract.ts'
+import type { ReasoningLevel } from './reasoning.ts'
 import { FALLBACK_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS, polzaCompat } from './models.ts'
 
 /** Учётки pi-ai этому маршруту не нужны: ключ приходит опцией запроса. */
@@ -53,6 +55,7 @@ export interface PolzaProfileInput {
   displayName?: string
   retryPath?: string
   modelProviders?: (modelId: string) => readonly string[] | undefined
+  providerDetails?: (modelId: string) => readonly PolzaModelProvider[] | undefined
 }
 
 export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProviderProfile {
@@ -64,13 +67,32 @@ export function buildPolzaProfile(input: PolzaProfileInput): ResolvedPiAiProvide
     modelId: string,
     options?: T,
   ): T | undefined {
-    const selected = input.modelProviders?.(modelId)
-    if (!selected?.length) return options
+    const selected = input.modelProviders?.(modelId) ?? []
+    const request = gatewayRequest()
+    const entries = input.providerDetails?.(modelId)
+    if (selected.length === 0 && request === undefined) return options
     return {
       ...options,
       onPayload: async (payload: unknown, model: Model<Api>) => {
-        const body = await options?.onPayload?.(payload, model) ?? payload
-        return { ...body as Record<string, unknown>, provider: { only: selected, order: selected, allow_fallbacks: true } }
+        const original = await options?.onPayload?.(payload, model) ?? payload
+        const body = { ...original as Record<string, unknown> }
+        const effort = request?.reasoningEffort
+        if (request !== undefined) {
+          // PiAiAdapter passes both "off" and no selection as undefined to pi-ai.
+          if (effort === undefined) delete body.reasoning
+          else body.reasoning = { effort: effort === 'off' ? 'none' : effort }
+        }
+        if (selected.length > 0) body.provider = { only: selected, order: selected, allow_fallbacks: true }
+        if (effort !== undefined && entries?.length) {
+          const compatible = new Set(entries.filter(entry => entry.reasoningLevels.includes(effort as ReasoningLevel)).map(entry => entry.name))
+          if (compatible.size === 0 || selected.some(provider => !compatible.has(provider))) {
+            throw new Error(`Уровень рассуждений ${effort} недоступен для выбранных провайдеров Polza. Выберите совместимый уровень или «По умолчанию» в пикере.`)
+          }
+          if (selected.length === 0 && compatible.size < entries.length) {
+            body.provider = { only: [...compatible], allow_fallbacks: true }
+          }
+        }
+        return body
       },
     } as T
   }

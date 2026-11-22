@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { parsePolzaCatalog } from '../src/contract.ts'
+import { parsePolzaCatalog, parsePolzaCatalogEntry } from '../src/contract.ts'
 import { polzaCompat, thinkingLevelMap, toPiModel } from '../src/models.ts'
 
 const catalog = parsePolzaCatalog(JSON.parse(readFileSync(new URL('./fixtures/catalog.json', import.meta.url), 'utf8')))
@@ -11,6 +11,13 @@ const byId = (id: string) => {
 }
 
 describe('catalog → pi-ai model', () => {
+  it('uses the top provider levels when the model list has no root reasoning object', () => {
+    const model = parsePolzaCatalogEntry({
+      id: 'deepseek/fixture', name: 'DeepSeek',
+      top_provider: { supported_parameters: ['reasoning'], reasoning: { supported_efforts: ['max', 'high', 'low', 'none'] } },
+    })
+    expect(model && thinkingLevelMap(model)).toMatchObject({ off: 'none', low: 'low', medium: null, max: 'max' })
+  })
   it('reads reasoning without an explicit effort list as low/medium/high', () => {
     const model = toPiModel(byId('anthropic/claude-sonnet-5.5'), 'polza', 'https://polza.ai/api/v1')
     expect(model.reasoning).toBe(true)

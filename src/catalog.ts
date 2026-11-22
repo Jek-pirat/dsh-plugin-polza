@@ -2,11 +2,12 @@
 // Последний удачный ответ лежит на диске, чтобы пикер не ждал сеть при старте.
 import { readFile } from 'node:fs/promises'
 import { writeFileAtomic } from './atomic.ts'
-import { parsePolzaCatalog, polzaModelSlugSchema } from './contract.ts'
-import type { PolzaCatalogModel } from './contract.ts'
+import { parsePolzaCatalog, parsePolzaModelProviders, polzaModelSlugSchema } from './contract.ts'
+import type { PolzaCatalogModel, PolzaModelProvider } from './contract.ts'
 
 const CATALOG_PATH = '/v1/models?type=chat'
 const CATALOG_TIMEOUT_MS = 90_000
+const PROVIDER_DETAILS_TTL_MS = 5 * 60_000
 
 export interface FetchCatalogOptions {
   fetchImpl?: typeof fetch
@@ -29,7 +30,7 @@ export async function fetchPolzaCatalog(baseUrl: string, options: FetchCatalogOp
   return models
 }
 
-export async function fetchModelProviders(baseUrl: string, model: string, fetchImpl: typeof fetch = fetch): Promise<string[]> {
+export async function fetchModelProviders(baseUrl: string, model: string, fetchImpl: typeof fetch = fetch): Promise<PolzaModelProvider[]> {
   const slug = polzaModelSlugSchema.parse(model).split('/').map(encodeURIComponent).join('/')
   const response = await fetchImpl(`${trimSlash(baseUrl)}/v1/models/${slug}`, {
     headers: { accept: 'application/json' },
@@ -37,13 +38,7 @@ export async function fetchModelProviders(baseUrl: string, model: string, fetchI
   })
   if (!response.ok) throw new Error(`каталог Пользы ответил HTTP ${response.status}`)
   const detail = await response.json() as { data?: { providers?: unknown }; providers?: unknown } | null
-  const providers = detail?.data?.providers ?? detail?.providers
-  if (!Array.isArray(providers)) return []
-  const names = providers.flatMap((entry: unknown) => {
-    const name = (entry as { name?: unknown } | null)?.name
-    return typeof name === 'string' && name.length > 0 ? [name] : []
-  })
-  return [...new Set(names)]
+  return parsePolzaModelProviders(detail?.data?.providers ?? detail?.providers)
 }
 
 export function trimSlash(url: string): string {
@@ -64,6 +59,7 @@ export interface CatalogStoreOptions {
   load?: (baseUrl: string) => Promise<PolzaCatalogModel[]>
   now?: () => number
   onChange: (models: readonly PolzaCatalogModel[]) => void
+  onProvidersChange?: () => void
   onError?: (error: unknown) => void
 }
 
@@ -76,6 +72,8 @@ export class PolzaCatalogStore {
   private byId = new Map<string, PolzaCatalogModel>()
   private fetchedAt = 0
   private pending: Promise<void> | undefined
+  private readonly providerDetails = new Map<string, { entries: readonly PolzaModelProvider[]; expiresAt: number }>()
+  private readonly pendingProviders = new Map<string, Promise<readonly PolzaModelProvider[]>>()
   private readonly load: (baseUrl: string) => Promise<PolzaCatalogModel[]>
   private readonly now: () => number
 
@@ -90,6 +88,24 @@ export class PolzaCatalogStore {
 
   get(id: string): PolzaCatalogModel | undefined {
     return this.byId.get(id)
+  }
+
+  currentProviders(id: string): readonly PolzaModelProvider[] | undefined {
+    return this.providerDetails.get(id)?.entries
+  }
+
+  loadProviders(id: string): Promise<readonly PolzaModelProvider[]> {
+    const cached = this.providerDetails.get(id)
+    if (cached !== undefined && cached.expiresAt > this.now()) return Promise.resolve(cached.entries)
+    const pending = this.pendingProviders.get(id)
+    if (pending !== undefined) return pending
+    const load = fetchModelProviders(this.options.baseUrl, id).then(entries => {
+      this.providerDetails.set(id, { entries, expiresAt: this.now() + PROVIDER_DETAILS_TTL_MS })
+      this.options.onProvidersChange?.()
+      return entries
+    }).finally(() => { this.pendingProviders.delete(id) })
+    this.pendingProviders.set(id, load)
+    return load
   }
 
   /** Поднять кэш с диска, затем обновить из сети, если он устарел. */

@@ -33,7 +33,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
-import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconChevronUpOutlineRegular, IconCloseFillRegular,
   IconDataOutlineRegular, IconWarningOutlineRegular, Input, isMobileDevice, rankByName, StateDot, Tag, Toast,
@@ -41,19 +41,28 @@ import {
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelLabelOwner, ModelSelectInjected } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { PolzaStore } from '../api.ts'
-import type { T } from '../locale.ts'
+import type { PolzaKey, T } from '../locale.ts'
+import { BRAND_LIME, PolzaMark } from '../brand.tsx'
 import { useModelProvider } from './useModelProvider.ts'
 import css from './ModelSelect.module.css'
 import { orderModelProviders } from './provider-order.ts'
+import { providerReasoningLevels } from '../../provider-reasoning.ts'
+import type { ReasoningLevel } from '../../reasoning.ts'
 
 /** The root menu or a drilled-in list. */
 type Pane = 'root' | 'model' | 'provider' | 'effort'
+
+const EFFORT_LABELS = new Map<string, PolzaKey>([
+  ['minimal', 'effortMinimal'], ['low', 'effortLow'], ['medium', 'effortMedium'],
+  ['high', 'effortHigh'], ['xhigh', 'effortXhigh'], ['max', 'effortMax'],
+])
 
 /** One dynamic effort row; undefined means preserve the provider default. */
 interface EffortChoice {
   key: string
   effort: string | undefined
   label: string
+  disabledReason?: string
 }
 
 /**
@@ -75,6 +84,11 @@ export function ModelSelect(
   const [pane, setPane] = useState<Pane>('root')
   const [query, setQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null)
+  const [effortDraft, setEffortDraft] = useState<string>()
+  const [effortDrag, setEffortDrag] = useState<number>()
+  const [effortGlide, setEffortGlide] = useState(false)
+  const [effortAnchor, setEffortAnchor] = useState<{ right: number; bottom: number }>()
+  const effortSaving = useRef(false)
   const [selectionFocus, setSelectionFocus] = useState(false)
   // The in-menu error strip serves catalog loads (its Retry re-runs the
   // load); a rejected SELECTION announces through the transient toast
@@ -86,13 +100,15 @@ export function ModelSelect(
   const rootRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
+  const effortSliderRef = useRef<HTMLInputElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const groupsRef = useRef<HTMLDivElement | null>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const id = useId()
   // CSS anchor positioning (as in harness 0.2.2-rc.4): the trigger names the anchor, the portaled card follows it.
-  const anchorStyle: CSSProperties & Record<'--dsh-model-anchor', string> = {
+  const anchorStyle: CSSProperties & Record<'--dsh-model-anchor' | '--pz-effort-accent', string> = {
     '--dsh-model-anchor': `--dsh-model-${id.replaceAll(':', '')}`,
+    '--pz-effort-accent': BRAND_LIME,
   }
 
   const accountProviderName = t('provider.account')
@@ -130,35 +146,89 @@ export function ModelSelect(
     : choices.findIndex(c => c.selection.provider === state.current?.provider && c.selection.model === state.current.model)
   const currentChoice = choices[selectedIndex]
   const polzaModel = currentChoice?.selection.provider === 'polza' ? currentChoice.selection.model : undefined
-  const upstream = useModelProvider(store, polzaModel, open && pane === 'provider')
+  const upstream = useModelProvider(store, polzaModel, open, async (providers): Promise<void> => {
+    const current = state.current
+    const effort = current?.reasoningEffort
+    if (current === null || effort === undefined || routeReasoning === undefined
+      || providerReasoningLevels(routeReasoning, providers).includes(effort as ReasoningLevel)) return
+    const result = await select({ provider: current.provider, model: current.model })
+    if (result !== undefined && !result.ok) settleSelection(result)
+  })
   const providerSummary = upstream.selected.join(', ') || providerT('providerAuto')
   const providerRows = pane === 'provider'
     ? [...upstream.selected, ...upstream.providers.filter(provider => !upstream.selected.includes(provider))]
     : []
   const providerLocked = locked || state.pending !== null || !upstream.ready
   const reasoning = currentChoice?.model.reasoning
+  const routeReasoning = upstream.reasoning !== undefined && upstream.providers.length > 0
+    ? new Map(Object.entries(upstream.reasoning))
+    : undefined
+  const levels = routeReasoning === undefined ? undefined : providerReasoningLevels(routeReasoning, upstream.selected)
+  const offBlockers = routeReasoning !== undefined && providerReasoningLevels(routeReasoning).includes('off')
+    ? upstream.selected.filter(provider => !routeReasoning.get(provider)?.includes('off'))
+    : []
+  const showEffort = reasoning !== undefined || (polzaModel !== undefined
+    && ((levels?.length ?? 0) > 0 || offBlockers.length > 0 || state.current?.reasoningEffort !== undefined))
+  const visibleEfforts = levels !== undefined ? levels.map(effort => ({
+    id: effort,
+    name: reasoning?.efforts.find(level => level.id === effort)?.name ?? effort.charAt(0).toUpperCase() + effort.slice(1),
+  })) : polzaModel !== undefined && (upstream.selected.length > 0 || (open && upstream.status === 'loading'))
+    ? [] : reasoning?.efforts ?? []
   const effectiveEffort = state.current?.reasoningEffort ?? reasoning?.defaultEffort
+  const effortName = (effort: string, name: string): string => {
+    const label = EFFORT_LABELS.get(effort)
+    return polzaModel !== undefined && label !== undefined ? providerT(label) : name
+  }
   const effortLabel = currentChoice === undefined
     ? undefined
-    : reasoning === undefined
+    : !showEffort
       ? state.retainedEffort
       : effectiveEffort === undefined
         ? t('effort.providerDefault')
-        : reasoning.efforts.find(level => level.id === effectiveEffort)?.name ?? effectiveEffort
-  const effortChoices = useMemo<readonly EffortChoice[]>(() => reasoning === undefined
-    ? []
-    : [
-      ...reasoning.defaultEffort === undefined
-        ? [{ key: 'provider-default', effort: undefined, label: t('effort.providerDefault') }]
-        : [],
-      ...reasoning.efforts.map((effort: ModelReasoningEffort) => ({
-        key: `effort:${effort.id}`,
-        effort: effort.id,
-        label: effort.name,
-      })),
-    ], [reasoning, t])
+        : polzaModel !== undefined && effectiveEffort === 'off' && visibleEfforts.some(level => level.id === 'off')
+          ? providerT('reasoningDisabled')
+          : effortName(effectiveEffort, visibleEfforts.find(level => level.id === effectiveEffort)?.name ?? effectiveEffort)
+  const effortChoices: readonly EffortChoice[] = showEffort ? [
+    ...reasoning?.defaultEffort === undefined
+      ? [{ key: 'provider-default', effort: undefined, label: t('effort.providerDefault') }]
+      : [],
+    ...(offBlockers.length > 0 ? [{
+      key: 'effort:off', effort: 'off', label: providerT('reasoningOff'),
+      disabledReason: providerT('reasoningOffUnavailable', { providers: offBlockers.join(', ') }),
+    }] : []),
+    ...visibleEfforts.map(effort => ({
+      key: `effort:${effort.id}`,
+      effort: effort.id,
+      label: polzaModel !== undefined && effort.id === 'off' ? providerT('reasoningOff') : effortName(effort.id, effort.name),
+    })),
+  ] : []
+  const effortSteps = polzaModel === undefined ? [] : effortChoices.filter(level => level.disabledReason === undefined)
+  const draftStep = effortSteps.findIndex(level => level.key === effortDraft)
+  const sliderValue = effortDrag ?? (draftStep >= 0 ? draftStep : Math.max(0, effortSteps.findIndex(level => level.effort === effectiveEffort)))
+  const sliderStep = Math.round(sliderValue)
+  const sliderChoice = effortSteps[sliderStep]
+  const sliderProgress = sliderValue / Math.max(1, effortSteps.length - 1)
+  const displayedEffort = sliderChoice?.effort === 'off' ? providerT('reasoningDisabled') : sliderChoice?.label ?? effortLabel
+  const unavailableOff = effortChoices.find(level => level.disabledReason !== undefined)
   const { pending } = state
   const busy = pending !== null
+
+  useLayoutEffect(() => {
+    if (!open || pane !== 'effort' || polzaModel === undefined) return
+    // The trigger's label may change width after a selection. Keep this pane anchored to its opening position.
+    const measure = () => {
+      const anchor = triggerRef.current?.getBoundingClientRect()
+      const menu = menuRef.current?.getBoundingClientRect()
+      if (anchor === undefined || menu === undefined) return
+      const viewportWidth = document.documentElement.clientWidth
+      const maxRight = Math.max(12, viewportWidth - menu.width - 12)
+      const right = Math.min(maxRight, Math.max(12, viewportWidth - anchor.right))
+      setEffortAnchor({ right, bottom: window.innerHeight - anchor.top + 8 })
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => { window.removeEventListener('resize', measure) }
+  }, [open, pane, polzaModel])
 
   const reload = (): void => {
     lastActionRef.current = 'load'
@@ -195,6 +265,10 @@ export function ModelSelect(
     paneFocus.current = null
     if (!open || intent === null) return
     if (intent === 'drill') {
+      if (pane === 'effort' && effortSliderRef.current !== null) {
+        effortSliderRef.current.focus()
+        return
+      }
       if (pane === 'model' && showSearch && !isMobileDevice()) {
         searchRef.current?.focus()
         return
@@ -235,6 +309,8 @@ export function ModelSelect(
   if (!available) return null
 
   const show = (): void => {
+    setEffortDraft(undefined)
+    setEffortDrag(undefined)
     setSelectionFocus(false)
     triggerRef.current?.focus()
     setQuery('')
@@ -251,6 +327,8 @@ export function ModelSelect(
   }
 
   const close = (restoreFocus = false): void => {
+    setEffortDraft(undefined)
+    setEffortDrag(undefined)
     setOpen(false)
     setPane('root')
     if (restoreFocus) queueMicrotask(() => { triggerRef.current?.focus() })
@@ -270,6 +348,8 @@ export function ModelSelect(
 
   /** Leave a drilled pane for the root one, handing the keyboard back to its cell. */
   const back = (from: Exclude<Pane, 'root'>): void => {
+    setEffortDraft(undefined)
+    setEffortDrag(undefined)
     paneFocus.current = from
     setPane('root')
   }
@@ -406,6 +486,31 @@ export function ModelSelect(
     submit(selection)
   }
 
+  const applySliderEffort = (index: number, glide = false): void => {
+    const choice = effortSteps[index]
+    const current = state.current
+    if (choice === undefined || current === null || busy || effortSaving.current) return
+    setEffortGlide(glide)
+    setEffortDrag(undefined)
+    if (choice.effort === effectiveEffort) {
+      setEffortDraft(undefined)
+      return
+    }
+    effortSaving.current = true
+    setEffortDraft(choice.key)
+    lastActionRef.current = 'select'
+    void select({
+      provider: current.provider,
+      model: current.model,
+      ...choice.effort === undefined ? {} : { reasoningEffort: choice.effort },
+    }).then(result => {
+      if (result !== undefined && !result.ok) settleSelection(result)
+    }).finally(() => {
+      effortSaving.current = false
+      setEffortDraft(undefined)
+    })
+  }
+
   const waiting = currentChoice === undefined && state.status === 'loading'
   const modelLabel = waiting
     ? t('trigger.loading')
@@ -490,10 +595,12 @@ export function ModelSelect(
         <MenuSurface
           ref={menuRef}
           id={`${id}-menu`}
-          className={css.menu}
-          style={anchorStyle}
-          role={pane === 'model' ? 'group' : 'menu'}
-          aria-label={pane === 'provider' ? providerT('provider') : t('menu.aria')}
+          className={clsx(css.menu, pane === 'effort' && polzaModel !== undefined && css.effortMenu)}
+          style={pane === 'effort' && polzaModel !== undefined && effortAnchor !== undefined
+            ? { ...anchorStyle, right: effortAnchor.right, bottom: effortAnchor.bottom }
+            : anchorStyle}
+          role={pane === 'model' || (pane === 'effort' && polzaModel !== undefined) ? 'group' : 'menu'}
+          aria-label={pane === 'provider' ? providerT('provider') : pane === 'effort' ? t('menu.effort') : t('menu.aria')}
           aria-busy={state.status === 'loading' || busy || (pane === 'provider' && upstream.saving)}
         >
           {pane === 'root' && (
@@ -513,7 +620,7 @@ export function ModelSelect(
                   <IconChevronRightOutlineRegular className={css.cellChevron} />
                 </button>
               )}
-              {reasoning !== undefined && (
+              {showEffort && (
                 <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('effort') }}>
                   <span className={css.cellLabel}>{t('menu.effort')}</span>
                   <span className={css.cellValue}>{effortLabel}</span>
@@ -694,30 +801,115 @@ export function ModelSelect(
                 </div>
               )}
               <div className={clsx(css.groups, 'scrollable')}>
-                {effortChoices.length === 0
-                  ? <div className={css.empty}>{t('empty.efforts')}</div>
-                  : effortChoices.map(level => (
-                    <button
-                      ref={itemRef()}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={effectiveEffort === level.effort}
-                      className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
-                      key={level.key}
-                      disabled={busy}
-                      onClick={() => { chooseEffort(level.effort) }}
-                    >
-                      <span className={css.optionCopy}>
-                        <span className={css.modelName}>{level.label}</span>
+                {polzaModel !== undefined && effortChoices.length > 0 && (
+                  <div className={css.effortSummary}>
+                    <span className={css.effortModel} title={currentChoice?.model.name}>{currentChoice?.model.name}</span>
+                    <span className={css.effortValue}>{displayedEffort}</span>
+                  </div>
+                )}
+                {effortSteps.length > 1 && (
+                  <div className={css.effortScale} data-glide={effortGlide ? '' : undefined}>
+                    <input
+                      ref={effortSliderRef}
+                      type="range"
+                      className={css.effortSlider}
+                      min={0}
+                      max={effortSteps.length - 1}
+                      step="any"
+                      value={sliderValue}
+                      aria-label={t('menu.effort')}
+                      aria-valuetext={sliderChoice?.label}
+                      aria-description={providerT('effortSliderKeys')}
+                      aria-disabled={busy || undefined}
+                      onChange={event => { setEffortDrag(event.currentTarget.valueAsNumber) }}
+                      onPointerDown={event => {
+                        if (busy || effortSaving.current) event.preventDefault()
+                        else {
+                          setEffortGlide(false)
+                          event.currentTarget.setPointerCapture(event.pointerId)
+                        }
+                      }}
+                      onPointerUp={event => { applySliderEffort(Math.round(event.currentTarget.valueAsNumber), true) }}
+                      onPointerCancel={() => { setEffortDrag(undefined) }}
+                      onKeyDown={event => {
+                        if (busy && event.key !== 'Escape') {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          return
+                        }
+                        if (event.key === 'Enter' || event.key === ' ' || (event.key === 'Tab' && !event.shiftKey)) {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          applySliderEffort(sliderStep, true)
+                          return
+                        }
+                        const direction = ['ArrowUp', 'ArrowRight', 'PageUp'].includes(event.key) ? 1
+                          : ['ArrowDown', 'ArrowLeft', 'PageDown'].includes(event.key) ? -1 : 0
+                        if (direction !== 0 || event.key === 'Home' || event.key === 'End') {
+                          const last = effortSteps.length - 1
+                          const next = event.key === 'Home' ? 0 : event.key === 'End' ? last
+                            : Math.max(0, Math.min(last, sliderStep + direction))
+                          event.preventDefault()
+                          event.stopPropagation()
+                          setEffortGlide(false)
+                          setEffortDrag(undefined)
+                          setEffortDraft(effortSteps[next]?.key)
+                        }
+                      }}
+                    />
+                    <div className={css.effortTrack}>
+                      <span className={css.effortRail} aria-hidden="true">
+                        <span className={css.effortRailSegments} style={{ transform: `translateX(${100 * sliderProgress}%)` }} />
                       </span>
-                      <span className={css.check}>
-                        {pending !== null && pending.provider === state.current?.provider
-                          && pending.model === state.current.model && pending.reasoningEffort === level.effort
-                          ? <StateDot state="ongoing" />
-                          : effectiveEffort === level.effort ? <IconCheckOutlineRegular /> : null}
+                      {effortSteps.map((level, index) => (
+                        <button
+                          key={level.key}
+                          type="button"
+                          tabIndex={-1}
+                          className={css.effortPoint}
+                          data-current={index === sliderStep ? '' : undefined}
+                          data-passed={index < sliderValue ? '' : undefined}
+                          style={{ left: `${100 * index / (effortSteps.length - 1)}%` }}
+                          title={level.label}
+                          aria-label={level.label}
+                          aria-pressed={index === sliderStep}
+                          aria-disabled={busy || undefined}
+                          onPointerDown={event => { event.preventDefault() }}
+                          onClick={() => { applySliderEffort(index, true) }}
+                        />
+                      ))}
+                      <span className={css.effortThumbTravel} aria-hidden="true" style={{ transform: `translateX(${100 * sliderProgress}%)` }}>
+                        <span className={css.effortThumb}><PolzaMark size={16} /></span>
                       </span>
-                    </button>
-                  ))}
+                    </div>
+                  </div>
+                )}
+                {polzaModel !== undefined && unavailableOff?.disabledReason !== undefined && (
+                  <div className={css.effortUnavailable}>{unavailableOff.disabledReason}</div>
+                )}
+                {effortChoices.length === 0 && <div className={css.empty}>{t('empty.efforts')}</div>}
+                {polzaModel === undefined && effortChoices.map(level => (
+                      <button
+                        ref={itemRef()}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={effectiveEffort === level.effort}
+                        className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
+                        key={level.key}
+                        disabled={busy}
+                        onClick={() => { chooseEffort(level.effort) }}
+                      >
+                        <span className={css.optionCopy}>
+                          <span className={css.modelName}>{level.label}</span>
+                        </span>
+                        <span className={css.check}>
+                          {pending !== null && pending.provider === state.current?.provider
+                            && pending.model === state.current.model && pending.reasoningEffort === level.effort
+                            ? <StateDot state="ongoing" />
+                            : effectiveEffort === level.effort ? <IconCheckOutlineRegular /> : null}
+                        </span>
+                      </button>
+                ))}
               </div>
             </>
           )}

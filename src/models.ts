@@ -2,12 +2,11 @@
 import type { Api, Model, OpenAICompletionsCompat, ThinkingLevelMap } from '@earendil-works/pi-ai'
 import type { PolzaCatalogModel } from './contract.ts'
 import { formatPolzaPriceLabel } from './contract.ts'
-
-/** Уровни pi-ai в порядке эскалации (см. dsh-llm-pi-ai THINKING_LEVELS). */
-const PI_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+import { declaredReasoningLevels, REASONING_LEVELS } from './reasoning.ts'
+import type { ReasoningLevel } from './reasoning.ts'
 
 /** Без явного списка усилий у рассуждающей модели — стандартная тройка. */
-const DEFAULT_EFFORTS = ['low', 'medium', 'high']
+const DEFAULT_EFFORTS = ['low', 'medium', 'high'] as const
 
 /** Окно и потолок вывода, когда каталог их не знает. */
 export const FALLBACK_CONTEXT_WINDOW = 128_000
@@ -36,19 +35,14 @@ export function polzaCompat(modelId: string): OpenAICompletionsCompat {
  * перечисляет `none` и модель не рассуждает принудительно; иначе при
  * невыбранном уровне в запрос ничего не уходит и действует умолчание Пользы.
  */
-export function thinkingLevelMap(model: PolzaCatalogModel): ThinkingLevelMap | undefined {
-  const efforts = effortsOf(model)
-  if (efforts === undefined) return undefined
+export function thinkingLevelMap(model: PolzaCatalogModel, providerLevels?: readonly ReasoningLevel[]): ThinkingLevelMap | undefined {
+  const efforts = providerLevels ?? (model.reasoningEfforts != null
+    ? declaredReasoningLevels(model.reasoningEfforts, model.reasoningMandatory)
+    : model.supportsReasoning ? DEFAULT_EFFORTS : [])
+  if (efforts.length === 0) return undefined
   const map: ThinkingLevelMap = {}
-  map.off = efforts.includes('none') && !model.reasoningMandatory ? 'none' : null
-  for (const level of PI_LEVELS) map[level] = efforts.includes(level) ? level : null
+  for (const level of REASONING_LEVELS) map[level] = efforts.includes(level) ? level === 'off' ? 'none' : level : null
   return map
-}
-
-function effortsOf(model: PolzaCatalogModel): string[] | undefined {
-  const listed = model.reasoningEfforts?.map(effort => effort.toLowerCase())
-  if (listed !== undefined) return listed.some(effort => effort !== 'none') ? listed : undefined
-  return model.supportsReasoning ? DEFAULT_EFFORTS : undefined
 }
 
 /** «Anthropic: Claude Sonnet 5.5» → «Claude Sonnet 5.5»: вендор и так виден в id. */
@@ -67,8 +61,8 @@ export function describe(model: PolzaCatalogModel): string {
 }
 
 /** Дескриптор pi-ai для одной модели каталога. */
-export function toPiModel(model: PolzaCatalogModel, provider: string, baseUrl: string): Model<Api> {
-  const levels = thinkingLevelMap(model)
+export function toPiModel(model: PolzaCatalogModel, provider: string, baseUrl: string, providerLevels?: readonly ReasoningLevel[]): Model<Api> {
+  const levels = thinkingLevelMap(model, providerLevels)
   const contextWindow = model.contextLength ?? FALLBACK_CONTEXT_WINDOW
   return {
     id: model.id,
